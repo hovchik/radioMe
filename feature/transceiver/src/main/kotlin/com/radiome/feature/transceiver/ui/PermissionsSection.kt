@@ -37,6 +37,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import com.radiome.feature.transceiver.map.MapLocation
+import com.radiome.feature.transceiver.map.OfflineMaps
 import com.radiome.feature.transceiver.settings.AppPermission
 import com.radiome.feature.transceiver.settings.PermissionAction
 import com.radiome.feature.transceiver.settings.PermissionRow
@@ -62,6 +64,7 @@ internal object PermissionPrompts {
     private fun manifestToApp(permission: String): AppPermission? = when (permission) {
         Manifest.permission.RECORD_AUDIO -> AppPermission.MICROPHONE
         "android.permission.POST_NOTIFICATIONS" -> AppPermission.NOTIFICATIONS
+        Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION -> AppPermission.LOCATION
         else -> null
     }
 
@@ -72,6 +75,24 @@ private fun AppPermission.manifestName(): String? = when (this) {
     AppPermission.MICROPHONE -> Manifest.permission.RECORD_AUDIO
     AppPermission.NOTIFICATIONS -> if (Build.VERSION.SDK_INT >= TIRAMISU) Manifest.permission.POST_NOTIFICATIONS else null
     AppPermission.PHOTOS -> null
+    AppPermission.LOCATION -> Manifest.permission.ACCESS_FINE_LOCATION
+    AppPermission.LOCATION_SERVICES, AppPermission.INTERNET -> null
+}
+
+/** What the system prompt asks for: location always asks for both, so Android 12+ offers precise and approximate. */
+private fun AppPermission.requestNames(): Array<String> = when (this) {
+    AppPermission.LOCATION -> arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+    else -> listOfNotNull(manifestName()).toTypedArray()
+}
+
+private fun Context.openLocationSettings() {
+    startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+private fun Context.openSettingsFor(p: AppPermission) = when (p) {
+    AppPermission.NOTIFICATIONS -> openNotificationSettings()
+    AppPermission.LOCATION_SERVICES -> openLocationSettings()
+    else -> openAppSettings()
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -114,6 +135,10 @@ fun PermissionsSection(onBeforeRevokeMicrophone: () -> Unit) {
             micGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
             notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled(),
             askedBefore = PermissionPrompts.asked(context),
+            locationGranted = MapLocation.granted(context),
+            preciseLocation = MapLocation.precise(context),
+            locationServicesOn = MapLocation.servicesOn(context),
+            mapDownloadsOn = OfflineMaps.onlineTiles(context),
             showRationale = AppPermission.entries.filter { p ->
                 val name = p.manifestName()
                 activity != null && name != null && ActivityCompat.shouldShowRequestPermissionRationale(activity, name)
@@ -121,19 +146,18 @@ fun PermissionsSection(onBeforeRevokeMicrophone: () -> Unit) {
         )
     }
 
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { refresh++ }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { refresh++ }
     var revoking by remember { mutableStateOf<AppPermission?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         rows.forEach { row ->
             PermissionRowView(row) {
                 when (row.action) {
-                    PermissionAction.REQUEST -> row.permission.manifestName()?.let {
-                        PermissionPrompts.markAsked(context, listOf(it))
+                    PermissionAction.REQUEST -> row.permission.requestNames().takeIf { it.isNotEmpty() }?.let {
+                        PermissionPrompts.markAsked(context, it.toList())
                         launcher.launch(it)
                     }
-                    PermissionAction.OPEN_SETTINGS ->
-                        if (row.permission == AppPermission.NOTIFICATIONS) context.openNotificationSettings() else context.openAppSettings()
+                    PermissionAction.OPEN_SETTINGS -> context.openSettingsFor(row.permission)
                     PermissionAction.REVOKE -> revoking = row.permission
                     PermissionAction.NONE -> Unit
                 }
@@ -147,7 +171,7 @@ fun PermissionsSection(onBeforeRevokeMicrophone: () -> Unit) {
             onDismiss = { revoking = null },
             onOpenSettings = {
                 revoking = null
-                if (p == AppPermission.NOTIFICATIONS) context.openNotificationSettings() else context.openAppSettings()
+                context.openSettingsFor(p)
             },
             onRevokeNow = if (p == AppPermission.MICROPHONE && Build.VERSION.SDK_INT >= TIRAMISU) {
                 {
@@ -171,15 +195,15 @@ fun PermissionsSection(onBeforeRevokeMicrophone: () -> Unit) {
 private fun PermissionRowView(row: PermissionRow, onAction: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(row.permission.title, style = MaterialTheme.typography.bodyLarge)
+            Text(tr(row.permission.title), style = MaterialTheme.typography.bodyLarge)
             val (status, color) = when (row.status) {
                 PermissionStatus.GRANTED -> tr("Allowed") to MaterialTheme.colorScheme.primary
                 PermissionStatus.DENIED -> tr("Not allowed") to MaterialTheme.colorScheme.error
                 PermissionStatus.NOT_NEEDED -> tr("Not needed") to MaterialTheme.colorScheme.onSurfaceVariant
             }
             Text(status, style = MaterialTheme.typography.labelLarge, color = color)
-            Text(row.permission.purpose, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            row.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Text(tr(row.permission.purpose), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            row.note?.let { Text(tr(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         val label = when (row.action) {
             PermissionAction.REQUEST -> tr("Allow")
@@ -202,7 +226,7 @@ private fun RevokeDialog(permission: AppPermission, onDismiss: () -> Unit, onOpe
                 "The next time you turn the radio on, RadioMe will ask for the microphone again."
         else ->
             "Android 12 and older don't let an app give up a permission by itself. On the settings page that opens, " +
-                "tap Permissions, then Microphone, then Don't allow. Android closes RadioMe when you do."
+                "tap Permissions, then ${permission.title}, then Don't allow. Android closes RadioMe when you do."
     }
     AlertDialog(
         onDismissRequest = onDismiss,

@@ -3,7 +3,11 @@ package com.radiome.feature.transceiver.map
 import com.radiome.core.protocol.payload.Position
 import com.radiome.data.StationPosition
 import java.util.Locale
+import kotlin.math.PI
 import kotlin.math.atan2
+import kotlin.math.floor
+import kotlin.math.ln
+import kotlin.math.tan
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -108,4 +112,73 @@ object MapGeo {
     fun StationPosition.latLon(): LatLon = position.latLon()
 
     fun Position.latLon(): LatLon = LatLon(latitude, longitude)
+
+    // ------------------------------------------------------------------------------------- saving an area offline
+
+    /**
+     * OpenStreetMap's tile policy forbids downloading "significantly more than 250 tiles" for offline use, so one
+     * save never fetches more than this.
+     */
+    const val MAX_SAVE_TILES = 250
+
+    /** Deepest zoom saved: street level. */
+    const val MAX_SAVE_ZOOM = 18
+
+    /** Web Mercator stops here. */
+    private const val MAX_LAT = 85.05112878
+
+    /** Tiles x in [xMin, xMax] and y in [yMin, yMax] at zoom [z]. */
+    data class TileRange(val z: Int, val xMin: Int, val xMax: Int, val yMin: Int, val yMax: Int) {
+        val count: Int get() = (xMax - xMin + 1) * (yMax - yMin + 1)
+    }
+
+    fun tileX(lon: Double, z: Int): Int {
+        val n = 1 shl z
+        return floor((lon + 180.0) / 360.0 * n).toInt().coerceIn(0, n - 1)
+    }
+
+    fun tileY(lat: Double, z: Int): Int {
+        val n = 1 shl z
+        val r = Math.toRadians(lat.coerceIn(-MAX_LAT, MAX_LAT))
+        return floor((1.0 - ln(tan(r) + 1.0 / cos(r)) / PI) / 2.0 * n).toInt().coerceIn(0, n - 1)
+    }
+
+    fun tileRange(north: Double, south: Double, east: Double, west: Double, z: Int): TileRange {
+        // A view across the date line (west > east) is saved as its larger, eastern part.
+        val w = if (west > east) -180.0 else west
+        return TileRange(z, tileX(w, z), tileX(east, z), tileY(north, z), tileY(south, z))
+    }
+
+    /**
+     * What "save this area" fetches: the zoom on screen, up to four wider zooms for context, then as many closer
+     * zooms as fit in [maxTiles]. Null when the area on screen alone is already too big: zoom in first.
+     */
+    fun planSave(
+        north: Double,
+        south: Double,
+        east: Double,
+        west: Double,
+        zoom: Double,
+        maxTiles: Int = MAX_SAVE_TILES,
+        maxZoom: Int = MAX_SAVE_ZOOM,
+    ): List<TileRange>? {
+        val z0 = floor(zoom).toInt().coerceIn(0, maxZoom)
+        val first = tileRange(north, south, east, west, z0)
+        if (first.count > maxTiles) return null
+        val plan = mutableListOf(first)
+        var total = first.count
+        for (z in (z0 - 1) downTo maxOf(0, z0 - 4)) {
+            val r = tileRange(north, south, east, west, z)
+            if (total + r.count > maxTiles) break
+            plan += r
+            total += r.count
+        }
+        for (z in (z0 + 1)..maxZoom) {
+            val r = tileRange(north, south, east, west, z)
+            if (total + r.count > maxTiles) break
+            plan += r
+            total += r.count
+        }
+        return plan.sortedBy { it.z }
+    }
 }
