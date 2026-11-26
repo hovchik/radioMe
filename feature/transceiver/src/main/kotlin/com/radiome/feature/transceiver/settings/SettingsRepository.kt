@@ -83,6 +83,7 @@ class SettingsRepository(
             showWaterfall = this[WATERFALL] ?: d.showWaterfall,
             largeText = this[LARGE_TEXT] ?: d.largeText,
             haptics = this[HAPTICS] ?: d.haptics,
+            pttMode = enumOr(this[PTT], d.pttMode),
         ).sanitized()
     }
 
@@ -113,6 +114,7 @@ class SettingsRepository(
         this[WATERFALL] = s.showWaterfall
         this[LARGE_TEXT] = s.largeText
         this[HAPTICS] = s.haptics
+        this[PTT] = s.pttMode.name
     }
 
     private companion object {
@@ -141,6 +143,7 @@ class SettingsRepository(
         val WATERFALL = booleanPreferencesKey("show_waterfall")
         val LARGE_TEXT = booleanPreferencesKey("large_text")
         val HAPTICS = booleanPreferencesKey("haptics")
+        val PTT = stringPreferencesKey("ptt_mode")
         const val QUICK_SEPARATOR = "\n"
 
         inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =

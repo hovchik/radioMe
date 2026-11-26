@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
+    <!-- USB serial PTT adapters (optional). -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+
     <application>
         <service
             android:name=".TransceiverService"

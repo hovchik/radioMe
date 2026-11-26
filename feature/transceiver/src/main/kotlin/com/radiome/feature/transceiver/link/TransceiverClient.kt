@@ -27,6 +27,8 @@ interface TransceiverClient {
     val route: StateFlow<RouteInfo?>
     /** Input spectrum rows for the waterfall; computed only while someone collects this. */
     val waterfall: Flow<FloatArray> get() = emptyFlow()
+    /** USB serial adapter keying PTT, or null. */
+    val pttDevice: StateFlow<String?>
 
     /** Starts the foreground service. Call while the UI is visible and RECORD_AUDIO is granted. */
     fun startListening()

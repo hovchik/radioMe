@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.radiome.core.audio.PttMode
 import com.radiome.core.audio.RoutePreference
 import com.radiome.core.dsp.modem.ModemConfig
 import com.radiome.core.dsp.modem.ModemProfile
@@ -46,6 +47,8 @@ fun SettingsScreen(
     keyBusy: Boolean,
     onSetPassphrase: (String) -> Unit,
     onClearKey: () -> Unit,
+    /** USB adapter keying PTT, when one is in use. */
+    pttDevice: String? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -71,6 +74,25 @@ fun SettingsScreen(
                 RoutePreference.CABLE -> "Cable"
             }
         }) { v -> onChange { it.copy(routePreference = v) } }
+        Choice("Transmit keying (PTT)", PttMode.entries, settings.pttMode, {
+            when (it) {
+                PttMode.VOX -> "Radio's VOX"
+                PttMode.VOX_TONE -> "Tone on right channel"
+                PttMode.SERIAL_RTS -> "USB serial RTS"
+                PttMode.SERIAL_DTR -> "USB serial DTR"
+            }
+        }) { v -> onChange { it.copy(pttMode = v) } }
+        Text(
+            when (settings.pttMode) {
+                PttMode.VOX -> "The lead-in tone opens the radio's VOX. Works with any cable or acoustically."
+                PttMode.VOX_TONE -> "For cables whose PTT circuit listens to the right audio channel. Data stays on the left."
+                PttMode.SERIAL_RTS, PttMode.SERIAL_DTR ->
+                    "For Digirig and other cables with a USB serial chip (CP210x, FTDI, CH34x, CDC). Plug it in before " +
+                        "turning the radio on and allow USB access when Android asks." +
+                        (pttDevice?.let { " In use: $it." } ?: " No adapter connected yet.")
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
         IntSlider(
             "VOX lead-in", settings.leadInMs, ModemConfig.MIN_LEAD_IN_MS, ModemConfig.MAX_LEAD_IN_MS, 50, "ms",
             "Pilot tone before each burst so the radio's VOX and the far squelch open in time.",

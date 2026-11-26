@@ -1,6 +1,7 @@
 package com.radiome.feature.transceiver.settings
 
 import com.radiome.core.audio.AudioEngineConfig
+import com.radiome.core.audio.PttMode
 import com.radiome.core.audio.RoutePreference
 import com.radiome.core.dsp.modem.ModemConfig
 import com.radiome.core.dsp.modem.ModemProfile
@@ -55,6 +56,8 @@ data class RadioSettings(
     val largeText: Boolean = false,
     /** Vibrate when a message arrives or is delivered. */
     val haptics: Boolean = true,
+    /** How the radio is keyed: its own VOX, a tone on the right channel, or a USB serial adapter's RTS/DTR. */
+    val pttMode: PttMode = PttMode.VOX,
 ) {
     fun sanitized(): RadioSettings = copy(
         leadInMs = leadInMs.coerceIn(ModemConfig.MIN_LEAD_IN_MS, ModemConfig.MAX_LEAD_IN_MS),
@@ -80,7 +83,7 @@ data class RadioSettings(
         )
     }
 
-    fun audioConfig(): AudioEngineConfig = AudioEngineConfig(outputGain = outputGain)
+    fun audioConfig(): AudioEngineConfig = AudioEngineConfig(outputGain = outputGain, pttMode = pttMode)
 
     val outputGain: Float get() = sanitized().outputGainPercent / 100f
 
@@ -107,7 +110,7 @@ data class RadioSettings(
 
     /** True when switching from [old] to this needs the link restarted (lead-in, ARQ timing, audio engine). */
     fun needsLinkRestart(old: RadioSettings): Boolean =
-        modemConfig() != old.modemConfig() || arqConfig() != old.arqConfig()
+        modemConfig() != old.modemConfig() || arqConfig() != old.arqConfig() || pttMode != old.pttMode
 
     companion object {
         const val MIN_PARITY = 20

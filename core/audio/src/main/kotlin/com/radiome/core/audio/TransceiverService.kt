@@ -6,10 +6,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.hardware.usb.UsbManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -131,6 +134,50 @@ class TransceiverService : Service() {
         return START_NOT_STICKY
     }
 
+    private var serialPtt: UsbSerialPtt? = null
+    private val _pttDevice = MutableStateFlow<String?>(null)
+    /** USB serial adapter keying PTT, or null (none needed, none found, or access not granted yet). */
+    val pttDevice: StateFlow<String?> = _pttDevice.asStateFlow()
+
+    private val usbReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> serialPtt?.close()
+                UsbSerialPtt.ACTION_PERMISSION -> Unit
+            }
+            refreshPtt()
+        }
+    }
+    private var usbReceiverRegistered = false
+
+    /** Look for the PTT adapter again (after plugging it in, or once access was granted). */
+    fun refreshPtt() {
+        val keyer = serialPtt ?: return
+        keyer.refresh()
+        _pttDevice.value = keyer.deviceName
+    }
+
+    private fun registerUsbReceiver() {
+        if (usbReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(UsbSerialPtt.ACTION_PERMISSION)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(usbReceiver, filter)
+        }
+        usbReceiverRegistered = true
+    }
+
+    private fun unregisterUsbReceiver() {
+        if (!usbReceiverRegistered) return
+        runCatching { unregisterReceiver(usbReceiver) }
+        usbReceiverRegistered = false
+    }
+
     /** Run [block] on the link thread. Returns null when the radio is off. */
     suspend fun <T> onLink(block: (LinkController) -> T): T? = withContext(linkDispatcher) { _link.value?.let(block) }
 
@@ -175,6 +222,17 @@ class TransceiverService : Service() {
         val deps = (application as? DependenciesProvider)?.transceiverDependencies() ?: DefaultDependencies
         val ls = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
         val audio = AndroidAudioEngine(this, deps.audioConfig)
+        when (deps.audioConfig.pttMode) {
+            PttMode.SERIAL_RTS, PttMode.SERIAL_DTR -> {
+                val keyer = UsbSerialPtt(this, useRts = deps.audioConfig.pttMode == PttMode.SERIAL_RTS)
+                audio.ptt = keyer
+                serialPtt = keyer
+                registerUsbReceiver()
+                keyer.refresh()
+                _pttDevice.value = keyer.deviceName
+            }
+            else -> Unit
+        }
         val monitor = AudioRouteMonitor(this)
         monitor.preference = deps.routePreference
         monitor.start()
@@ -226,8 +284,11 @@ class TransceiverService : Service() {
         linkScope = null
         routeMonitor?.stop()
         routeMonitor = null
-        engine?.close()
+        engine?.close() // also releases the PTT keyer
         engine = null
+        serialPtt = null
+        _pttDevice.value = null
+        unregisterUsbReceiver()
         if (controller != null) dependencies?.onLinkStopped(controller)
         dependencies = null
     }
