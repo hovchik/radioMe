@@ -15,6 +15,10 @@ import com.radiome.core.protocol.session.TransferOptions
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import com.radiome.core.protocol.payload.CompressionMode
+import com.radiome.core.protocol.payload.ContentType
+import com.radiome.core.protocol.payload.Files
+import com.radiome.core.protocol.session.SessionHeader
+import com.radiome.feature.transceiver.share.HistoryExport
 import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.AirtimeEstimator
 import com.radiome.data.TransferRecord
@@ -429,6 +433,7 @@ class TransceiverViewModel @Inject constructor(
 
     /** [uri] is the content:// URI the photo picker returned. */
     fun onImagePicked(uri: String) {
+        clearFile()
         loadJob?.cancel()
         encodeJob?.cancel()
         sourceImage = null
@@ -485,6 +490,72 @@ class TransceiverViewModel @Inject constructor(
             if (e is CancellationException) throw e
             _compose.update { it.copy(image = it.image?.copy(busy = false, error = "Could not encode the image.")) }
         }
+    }
+
+    // ------------------------------------------------------------------------------------------ files
+
+    private var fileBytes: ByteArray? = null
+
+    /** A file the user picked; the UI reads it from the document picker. */
+    fun attachFile(name: String, bytes: ByteArray) {
+        if (bytes.isEmpty()) {
+            _messages.trySend("That file is empty.")
+            return
+        }
+        if (bytes.size > Files.MAX_BYTES) {
+            _messages.trySend("Files up to ${Files.MAX_BYTES / 1024} KB can be sent. This one is ${Presenters.formatBytes(bytes.size)}.")
+            return
+        }
+        clearImage()
+        val options = fileOptions(_compose.value)
+        val fitted = Files.fitName(name, options.chunkPayloadSize - SessionHeader.FIXED_SIZE)
+        fileBytes = bytes
+        _compose.update { it.copy(file = FileDraftUi(fitted, bytes.size, Presenters.bytesEstimate(bytes, options, airtime))) }
+    }
+
+    fun onFileTooLarge(sizeBytes: Long) {
+        _messages.trySend("Files up to ${Files.MAX_BYTES / 1024} KB can be sent. This one is ${Presenters.formatBytes(sizeBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())}.")
+    }
+
+    /** The whole history as plain text, for sharing or saving. */
+    fun historyText(): String = HistoryExport.text(historyItems.value)
+
+    fun notify(message: String) {
+        _messages.trySend(message)
+    }
+
+    fun clearFile() {
+        fileBytes = null
+        _compose.update { it.copy(file = null) }
+    }
+
+    private fun fileOptions(c: ComposeUi) = settings.value.transferOptions(c.profile, c.to)
+
+    private fun filePayload(): Payload? {
+        val bytes = fileBytes ?: return null
+        val f = _compose.value.file ?: return null
+        return Payload(ContentType.BINARY, bytes, f.name)
+    }
+
+    fun sendFile() {
+        val payload = filePayload() ?: return
+        val c = _compose.value
+        if (c.sending || !encryptionReady()) return
+        viewModelScope.launch {
+            _compose.update { it.copy(sending = true) }
+            warnIfMuted()
+            val sid = dispatch(payload, fileOptions(c))
+            _compose.update { it.copy(sending = false) }
+            if (sid == null) _messages.trySend("Turn the radio on first.") else clearFile()
+        }
+    }
+
+    fun queueFile() {
+        val payload = filePayload() ?: return
+        val c = _compose.value
+        if (!encryptionReady()) return
+        enqueue("${payload.name}, ${Presenters.formatBytes(payload.bytes.size)}", payload, fileOptions(c), c.auto)
+        clearFile()
     }
 
     fun clearImage() {

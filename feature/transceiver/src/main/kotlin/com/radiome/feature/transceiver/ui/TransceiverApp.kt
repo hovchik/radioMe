@@ -1,6 +1,8 @@
 package com.radiome.feature.transceiver.ui
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -24,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -32,7 +35,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.radiome.core.protocol.payload.Files
 import com.radiome.feature.transceiver.TransceiverViewModel
+import com.radiome.feature.transceiver.share.HistoryExport
+import kotlinx.coroutines.launch
 
 private enum class Tab(val label: String, val icon: ImageVector) {
     RADIO("Radio", Icons.Filled.Home),
@@ -106,6 +112,57 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let { viewModel.onImagePicked(it.toString()) }
     }
+    val scope = rememberCoroutineScope()
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            val picked = FileIo.read(context, uri, Files.MAX_BYTES)
+            when {
+                picked == null -> viewModel.notify("That file could not be read.")
+                picked.bytes == null -> viewModel.onFileTooLarge(picked.size)
+                else -> viewModel.attachFile(picked.name, picked.bytes)
+            }
+        }
+    }
+    val fileActions = remember(viewModel) {
+        FileActions({ filePicker.launch(arrayOf("*/*")) }, viewModel::clearFile, viewModel::sendFile, viewModel::queueFile)
+    }
+    // Saving: the document picker asks where, then we write what is waiting here.
+    var pendingSave by remember { mutableStateOf<ByteArray?>(null) }
+    val saveContract = remember {
+        object : ActivityResultContracts.CreateDocument("*/*") {
+            override fun createIntent(context: Context, input: String): Intent =
+                super.createIntent(context, input).setType(Files.mimeType(input))
+        }
+    }
+    val saver = rememberLauncherForActivityResult(saveContract) { uri ->
+        val bytes = pendingSave
+        pendingSave = null
+        if (uri != null && bytes != null) scope.launch {
+            viewModel.notify(if (FileIo.write(context, uri, bytes)) "Saved." else "Could not save the file.")
+        }
+    }
+    val historyActions = HistoryActions(
+        onDelete = { viewModel.deleteHistory(it) },
+        onShareLog = { FileIo.shareText(context, "RadioMe history", viewModel.historyText()) },
+        onSaveLog = {
+            pendingSave = viewModel.historyText().toByteArray(Charsets.UTF_8)
+            saver.launch("radiome-history.txt")
+        },
+        onSave = { r ->
+            r.payload?.let { bytes ->
+                pendingSave = displayImageBytes(r.contentType, bytes)
+                saver.launch(HistoryExport.suggestedName(r))
+            }
+        },
+        onSaveToGallery = { r ->
+            r.payload?.let { bytes ->
+                scope.launch {
+                    val ok = FileIo.saveToGallery(context, HistoryExport.suggestedName(r), "image/webp", displayImageBytes(r.contentType, bytes))
+                    viewModel.notify(if (ok) "Saved to Pictures/RadioMe." else "Could not save the picture.")
+                }
+            }
+        },
+    )
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -151,6 +208,7 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
                 onQuickMessage = viewModel::sendQuickMessage,
                 queue = queue,
                 queueActions = queueActions,
+                fileActions = fileActions,
                 modifier = modifier,
             )
             Tab.MAP -> MapScreen(
@@ -162,7 +220,7 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
                 onClear = { viewModel.clearPositions() },
                 modifier = modifier,
             )
-            Tab.HISTORY -> HistoryScreen(history, { viewModel.deleteHistory(it) }, modifier)
+            Tab.HISTORY -> HistoryScreen(history, historyActions, modifier)
             Tab.SETTINGS -> SettingsScreen(
                 settings = settings,
                 onChange = viewModel::updateSettings,

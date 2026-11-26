@@ -92,6 +92,10 @@ data class TransferCard(
 
 data class ComposeEstimate(val bytes: Int, val wireBytes: Int, val chunks: Int, val airtimeMs: Long, val compressed: Boolean)
 
+data class FileDraftUi(val name: String, val sizeBytes: Int, val estimate: ComposeEstimate) {
+    val large: Boolean get() = sizeBytes > com.radiome.core.protocol.payload.Files.WARN_BYTES
+}
+
 data class ImageDraftUi(
     val bytes: ByteArray? = null,
     val width: Int = 0,
@@ -146,6 +150,8 @@ data class ComposeUi(
     val profile: ModemProfile = ModemProfile.STANDARD,
     val textEstimate: ComposeEstimate? = null,
     val image: ImageDraftUi? = null,
+    /** A small file picked to send (PDF, GPX, contact card...). */
+    val file: FileDraftUi? = null,
     val sending: Boolean = false,
 )
 
@@ -234,7 +240,11 @@ object Presenters {
     /** Size and air time of a text message as it will go out (DEFLATE applied only when it helps). */
     fun textEstimate(text: String, options: TransferOptions, airtime: AirtimeEstimator): ComposeEstimate? {
         if (text.isEmpty()) return null
-        val bytes = text.toByteArray(Charsets.UTF_8)
+        return bytesEstimate(text.toByteArray(Charsets.UTF_8), options, airtime)
+    }
+
+    /** Air time of any payload with these options, after optional DEFLATE. */
+    fun bytesEstimate(bytes: ByteArray, options: TransferOptions, airtime: AirtimeEstimator): ComposeEstimate {
         val deflated = if (options.compression == CompressionMode.AUTO) Deflate.compress(bytes) else null
         val compressed = deflated != null && deflated.size < bytes.size
         val wire = if (compressed) deflated.size else bytes.size

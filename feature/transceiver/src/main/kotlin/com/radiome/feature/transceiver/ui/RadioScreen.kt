@@ -51,6 +51,7 @@ import com.radiome.core.protocol.image.MaxEdge
 import com.radiome.core.protocol.link.LinkState
 import com.radiome.feature.transceiver.ComposeUi
 import com.radiome.feature.transceiver.HeardStation
+import com.radiome.feature.transceiver.FileDraftUi
 import com.radiome.feature.transceiver.ImageDraftUi
 import com.radiome.feature.transceiver.LinkTestUi
 import com.radiome.feature.transceiver.QueuedItem
@@ -86,6 +87,7 @@ fun RadioScreen(
     onQuickMessage: (String) -> Unit,
     queue: List<QueuedItem>,
     queueActions: QueueActions,
+    fileActions: FileActions,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -101,12 +103,20 @@ fun RadioScreen(
         item {
             ComposeCard(
                 compose, radio.running, onDraftChange, onProfileChange, onSendText, onPickImage,
-                onImagePreset, onClearImage, onSendImage, heard, quickMessages, onToChange, onQuickMessage, queueActions,
+                onImagePreset, onClearImage, onSendImage, heard, quickMessages, onToChange, onQuickMessage, queueActions, fileActions,
             )
         }
         if (queue.isNotEmpty()) item { QueueCard(queue, radio.running, queueActions.onRemove) }
     }
 }
+
+/** Sending a small file: pick it with the document picker, then send it now or queue it. */
+class FileActions(
+    val onPick: () -> Unit,
+    val onClear: () -> Unit,
+    val onSend: () -> Unit,
+    val onQueue: () -> Unit,
+)
 
 /** What the compose card needs for Auto speed and the send queue. */
 class QueueActions(
@@ -295,6 +305,7 @@ private fun ComposeCard(
     onToChange: (String) -> Unit,
     onQuickMessage: (String) -> Unit,
     queueActions: QueueActions,
+    fileActions: FileActions,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -326,6 +337,11 @@ private fun ComposeCard(
                 }
             }
             val image = compose.image
+            val file = compose.file
+            if (file != null) {
+                FileDraft(file, compose.sending, running, fileActions)
+                return@Column
+            }
             if (image == null && quickMessages.isNotEmpty()) {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     quickMessages.forEach { q ->
@@ -353,6 +369,11 @@ private fun ComposeCard(
                         Spacer(Modifier.width(6.dp))
                         Text("Image")
                     }
+                    OutlinedButton(onClick = fileActions.onPick) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("File")
+                    }
                     Spacer(Modifier.weight(1f))
                     OutlinedButton(onClick = queueActions.onQueueText, enabled = compose.draft.isNotBlank()) { Text("Queue") }
                     Button(onClick = onSendText, enabled = running && compose.draft.isNotBlank() && !compose.sending) {
@@ -366,6 +387,35 @@ private fun ComposeCard(
             }
         }
     }
+}
+
+@Composable
+private fun FileDraft(file: FileDraftUi, sending: Boolean, running: Boolean, actions: FileActions) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(file.name, style = MaterialTheme.typography.titleSmall)
+            val zip = if (file.estimate.compressed) ", ${Presenters.formatBytes(file.estimate.wireBytes)} compressed" else ""
+            Text(
+                "${Presenters.formatBytes(file.sizeBytes)}$zip · ${file.estimate.chunks} chunks · about " +
+                    "${Presenters.formatDuration(file.estimate.airtimeMs)} on air",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        IconButton(onClick = actions.onClear) { Icon(Icons.Filled.Close, contentDescription = "Remove file") }
+    }
+    if (file.large) {
+        Text(
+            "This is a large file for a radio link. Make sure the channel is free for that long.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    Button(onClick = actions.onSend, enabled = running && !sending, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
+        Spacer(Modifier.width(6.dp))
+        Text("Send file")
+    }
+    OutlinedButton(onClick = actions.onQueue, modifier = Modifier.fillMaxWidth()) { Text("Add file to queue") }
 }
 
 @Composable
