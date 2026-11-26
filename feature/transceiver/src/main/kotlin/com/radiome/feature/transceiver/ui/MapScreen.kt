@@ -687,7 +687,7 @@ private fun stationIcon(res: Resources, label: String, color: Int, selected: Boo
     val stroke = (if (selected) 3.5f else 2.5f) * d
     val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 12f * d * res.configuration.fontScale
-        color = 0xFF202020.toInt()
+        this.color = 0xFF202020.toInt()
         isFakeBoldText = selected
     }
     val pad = 4f * d
