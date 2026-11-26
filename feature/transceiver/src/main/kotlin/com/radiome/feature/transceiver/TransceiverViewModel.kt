@@ -228,14 +228,14 @@ class TransceiverViewModel @Inject constructor(
             // The group key may have been removed since this was queued: drop it with a notice rather than send it in clear.
             if (options.encrypt && keys.key.value == null) {
                 _queue.update { q -> q.filterNot { it.id == next.id } }
-                _messages.trySend("Removed \"${next.label}\" from the queue: it was to go encrypted, but no group key is set now.")
+                _messages.trySend(tr("Removed \"%s\" from the queue: it was to go encrypted, but no group key is set now.", next.label))
                 continue
             }
             val sid = try {
                 dispatch(next.payload, options)
             } catch (e: IllegalStateException) {
                 _queue.update { q -> q.filterNot { it.id == next.id } }
-                _messages.trySend("Could not send \"${next.label}\": ${e.message}")
+                _messages.trySend(tr("Could not send \"%s\": %s", next.label, e.message ?: ""))
                 continue
             } ?: continue // the radio went off; try again when it is back
             _queue.update { q -> q.filterNot { it.id == next.id } }
