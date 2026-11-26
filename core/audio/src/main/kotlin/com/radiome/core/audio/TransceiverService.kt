@@ -13,6 +13,7 @@ import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import com.radiome.core.dsp.modem.MfskModemEngine
 import com.radiome.core.dsp.modem.ModemConfig
 import com.radiome.core.protocol.arq.ArqConfig
@@ -29,13 +30,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Foreground service that owns the audio engine and the [LinkController], so long transfers keep running with the
- * screen off. UI binds to it and reads [link]. Declared with the `microphone|mediaPlayback` types.
+ * screen off. The UI binds to it, reads [link], and calls into the link through [onLink]. Declared with the
+ * `microphone|mediaPlayback` types.
  *
- * The app supplies settings and persistence by making its Application implement [DependenciesProvider]
- * (wired through Hilt in Phase 4). Without one the service falls back to defaults and in-memory sessions.
+ * Binding does not start the radio: [start] (ACTION_START) does, and [stop] (ACTION_STOP, also the notification's
+ * Stop action) shuts the link down even while the UI stays bound.
+ *
+ * The app supplies settings and persistence by making its Application implement [DependenciesProvider]. Without one
+ * the service falls back to defaults and in-memory sessions.
  *
  * Android 14+: a microphone foreground service may only be started while the app is visible, so start it from the
  * UI (for example when the user enables listening), not from the background.
@@ -48,6 +54,15 @@ class TransceiverService : Service() {
         val audioConfig: AudioEngineConfig
         /** Activity to open when the notification is tapped. */
         val launchIntent: Intent?
+        val routePreference: RoutePreference get() = RoutePreference.AUTO
+
+        /**
+         * Runs on the link thread right after the controller is created, before the UI can reach it. Coroutines
+         * launched in [scope] run on the link thread and stop with the link.
+         */
+        fun onLinkStarted(link: LinkController, scope: CoroutineScope) {}
+
+        fun onLinkStopped(link: LinkController) {}
     }
 
     interface DependenciesProvider {
@@ -60,17 +75,25 @@ class TransceiverService : Service() {
 
     private val binder = LocalBinder()
 
-    /** Single-threaded: the link controller requires confined state. */
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default.limitedParallelism(1))
+    /** Single-threaded: the link controller requires confined state. Everything that touches it runs here. */
+    private val linkDispatcher = Dispatchers.Default.limitedParallelism(1)
+    private val scope = CoroutineScope(SupervisorJob() + linkDispatcher)
+
+    // Main-thread state.
+    private var linkScope: CoroutineScope? = null
+    private var dependencies: Dependencies? = null
     private var engine: AndroidAudioEngine? = null
-    private var linkJob: Job? = null
     private var routeMonitor: AudioRouteMonitor? = null
+    private var launchIntent: Intent? = null
 
     private val _link = MutableStateFlow<LinkController?>(null)
+    /** The running link, or null while the radio is off. */
     val link: StateFlow<LinkController?> = _link.asStateFlow()
 
+    private val _route = MutableStateFlow<AudioRoute?>(null)
+    val route: StateFlow<AudioRoute?> = _route.asStateFlow()
+
     val audioEngine: AndroidAudioEngine? get() = engine
-    val routes: AudioRouteMonitor? get() = routeMonitor
 
     override fun onBind(intent: Intent?): IBinder = binder
 
@@ -86,34 +109,68 @@ class TransceiverService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            stopSelf()
+            shutDown()
             return START_NOT_STICKY
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            stopSelf()
+            shutDown()
             return START_NOT_STICKY
         }
-        startInForeground(notification("Listening"))
+        if (!startInForeground(notification("Listening"))) {
+            shutDown()
+            return START_NOT_STICKY
+        }
         startLink()
-        return START_STICKY
+        // Not sticky: Android 14+ refuses to restart a microphone service from the background.
+        return START_NOT_STICKY
+    }
+
+    /** Run [block] on the link thread. Returns null when the radio is off. */
+    suspend fun <T> onLink(block: (LinkController) -> T): T? = withContext(linkDispatcher) { _link.value?.let(block) }
+
+    /** Stop and start the link so new modem / ARQ / audio settings take effect. Partial transfers persist. */
+    fun restartLink() {
+        if (linkScope == null) return
+        stopLink()
+        startLink()
+    }
+
+    /** Turn the radio off and leave the foreground. A bound UI keeps the (idle) service alive. Main thread. */
+    fun stopRadio() = shutDown()
+
+    fun setRoutePreference(preference: RoutePreference) {
+        routeMonitor?.preference = preference
+    }
+
+    fun setOutputGain(gain: Float) {
+        engine?.outputGain = gain
     }
 
     private fun startLink() {
-        if (_link.value != null) return
+        if (linkScope != null) return
         val deps = (application as? DependenciesProvider)?.transceiverDependencies() ?: DefaultDependencies
+        val ls = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
         val audio = AndroidAudioEngine(this, deps.audioConfig)
-        val monitor = AudioRouteMonitor(this).also { it.start() }
+        val monitor = AudioRouteMonitor(this)
+        monitor.preference = deps.routePreference
+        monitor.start()
         audio.preferredInput = monitor.route.value.input
         audio.preferredOutput = monitor.route.value.output
         audio.startCapture()
-        val controller = LinkController(audio, scope, deps.arqConfig, MfskModemEngine(deps.modemConfig), deps.sessionStore)
+        val controller = LinkController(audio, ls, deps.arqConfig, MfskModemEngine(deps.modemConfig), deps.sessionStore)
+
+        linkScope = ls
+        dependencies = deps
         engine = audio
         routeMonitor = monitor
-        linkJob = controller.start()
-        _link.value = controller
         launchIntent = deps.launchIntent
 
-        scope.launch {
+        ls.launch {
+            deps.onLinkStarted(controller, ls)
+            controller.start()
+            _link.value = controller
+        }
+        ls.launch {
             controller.state.collect { s ->
                 val text = when (s) {
                     LinkState.LISTENING -> "Listening"
@@ -123,15 +180,35 @@ class TransceiverService : Service() {
                 getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
             }
         }
-        scope.launch {
+        ls.launch {
             monitor.route.collect {
                 audio.preferredInput = it.input
                 audio.preferredOutput = it.output
+                _route.value = it
             }
         }
     }
 
-    private var launchIntent: Intent? = null
+    private fun stopLink() {
+        val ls = linkScope ?: return
+        val controller = _link.value
+        _link.value = null
+        _route.value = null
+        ls.cancel()
+        linkScope = null
+        routeMonitor?.stop()
+        routeMonitor = null
+        engine?.close()
+        engine = null
+        if (controller != null) dependencies?.onLinkStopped(controller)
+        dependencies = null
+    }
+
+    private fun shutDown() {
+        stopLink()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
 
     private fun notification(status: String): Notification {
         val stop = PendingIntent.getService(
@@ -151,7 +228,7 @@ class TransceiverService : Service() {
         return builder.build()
     }
 
-    private fun startInForeground(n: Notification) {
+    private fun startInForeground(n: Notification): Boolean = try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
@@ -161,15 +238,16 @@ class TransceiverService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, n)
         }
+        true
+    } catch (e: RuntimeException) {
+        // ForegroundServiceStartNotAllowedException / SecurityException when started from the background.
+        Log.w(TAG, "could not enter the foreground", e)
+        false
     }
 
     override fun onDestroy() {
-        linkJob?.cancel()
+        stopLink()
         scope.cancel()
-        routeMonitor?.stop()
-        engine?.close()
-        engine = null
-        _link.value = null
         super.onDestroy()
     }
 
@@ -182,6 +260,7 @@ class TransceiverService : Service() {
     }
 
     companion object {
+        private const val TAG = "TransceiverService"
         const val CHANNEL_ID = "radiome.transceiver"
         const val NOTIFICATION_ID = 0x5A
         const val ACTION_START = "com.radiome.core.audio.START"

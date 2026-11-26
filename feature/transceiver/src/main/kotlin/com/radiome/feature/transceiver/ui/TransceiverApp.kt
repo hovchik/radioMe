@@ -1,0 +1,118 @@
+package com.radiome.feature.transceiver.ui
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.radiome.feature.transceiver.TransceiverViewModel
+
+private enum class Tab(val label: String, val icon: ImageVector) {
+    RADIO("Radio", Icons.Filled.Home),
+    HISTORY("History", Icons.AutoMirrored.Filled.List),
+    SETTINGS("Settings", Icons.Filled.Settings),
+}
+
+/** Whole app UI: radio dashboard and composer, history, settings. */
+@Composable
+fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
+    val radio by viewModel.radio.collectAsStateWithLifecycle()
+    val compose by viewModel.compose.collectAsStateWithLifecycle()
+    val history by viewModel.historyItems.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val restartPending by viewModel.restartPending.collectAsStateWithLifecycle()
+    var tab by rememberSaveable { mutableStateOf(Tab.RADIO) }
+    val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
+
+    LaunchedEffect(viewModel) {
+        viewModel.messages.collect { snackbar.showSnackbar(it) }
+    }
+
+    val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        if (result[Manifest.permission.RECORD_AUDIO] == true) {
+            viewModel.startListening()
+        }
+    }
+    val startListening = {
+        val mic = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val wanted = buildList {
+            if (!mic) add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        if (mic && wanted.isEmpty()) viewModel.startListening() else permissions.launch(wanted.toTypedArray())
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { viewModel.onImagePicked(it.toString()) }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        bottomBar = {
+            NavigationBar {
+                Tab.entries.forEach { t ->
+                    NavigationBarItem(
+                        selected = tab == t,
+                        onClick = { tab = t },
+                        icon = { Icon(t.icon, contentDescription = null) },
+                        label = { Text(t.label) },
+                    )
+                }
+            }
+        },
+    ) { padding ->
+        val modifier = Modifier.padding(padding)
+        when (tab) {
+            Tab.RADIO -> RadioScreen(
+                radio = radio,
+                compose = compose,
+                restartPending = restartPending,
+                onStart = startListening,
+                onStop = viewModel::stopListening,
+                onRestart = viewModel::restartLink,
+                onDraftChange = viewModel::onDraftChange,
+                onProfileChange = viewModel::onProfileChange,
+                onSendText = viewModel::sendText,
+                onPickImage = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onImagePreset = viewModel::onImagePresetChange,
+                onClearImage = viewModel::clearImage,
+                onSendImage = viewModel::sendImage,
+                onRequestCorrections = { viewModel.requestCorrections(it) },
+                onCancel = { viewModel.cancel(it) },
+                modifier = modifier,
+            )
+            Tab.HISTORY -> HistoryScreen(history, { viewModel.deleteHistory(it) }, modifier)
+            Tab.SETTINGS -> SettingsScreen(settings, viewModel::updateSettings, modifier)
+        }
+    }
+}

@@ -1,0 +1,5 @@
+<resources>
+    <!-- Compose draws everything; the window theme only sets the splash and system bar defaults. -->
+    <style name="Theme.RadioMe" parent="android:Theme.Material.Light.NoActionBar" />
+    <color name="ic_launcher_background">#1B6B50</color>
+</resources>

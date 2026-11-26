@@ -32,7 +32,8 @@ kotlin {
 
 dependencies {
     api(project(":core:protocol"))
-    implementation(libs.room.runtime)
+    // RadioDatabase (a RoomDatabase) is part of this module's public API.
+    api(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
 

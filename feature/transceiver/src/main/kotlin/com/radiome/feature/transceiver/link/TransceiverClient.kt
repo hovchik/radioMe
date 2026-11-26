@@ -1,0 +1,43 @@
+package com.radiome.feature.transceiver.link
+
+import com.radiome.core.audio.RouteMode
+import com.radiome.core.audio.RoutePreference
+import com.radiome.core.dsp.modem.DemodTelemetry
+import com.radiome.core.protocol.link.LinkEvent
+import com.radiome.core.protocol.link.LinkState
+import com.radiome.core.protocol.link.TransferTelemetry
+import com.radiome.core.protocol.payload.Payload
+import com.radiome.core.protocol.session.TransferOptions
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+
+/** Where audio goes right now, for the status bar. */
+data class RouteInfo(val mode: RouteMode, val input: String, val output: String)
+
+/** What the UI needs from the radio. Implemented over [com.radiome.core.audio.TransceiverService]; faked in tests. */
+interface TransceiverClient {
+    /** True while the link is up (the foreground service is listening). */
+    val running: StateFlow<Boolean>
+    val linkState: StateFlow<LinkState>
+    val rx: StateFlow<DemodTelemetry>
+    val transfers: StateFlow<Map<Int, TransferTelemetry>>
+    val events: Flow<LinkEvent>
+    val route: StateFlow<RouteInfo?>
+
+    /** Starts the foreground service. Call while the UI is visible and RECORD_AUDIO is granted. */
+    fun startListening()
+    fun stopListening()
+
+    /** Queue a transfer and record it in the history. Null when the radio is off. */
+    suspend fun send(payload: Payload, options: TransferOptions): Int?
+    suspend fun requestCorrections(sessionId: Int): Boolean
+    suspend fun cancel(sessionId: Int)
+
+    /** Settings that apply without restarting the link. */
+    fun applyLive(route: RoutePreference, outputGain: Float)
+    /** Restart the link so lead-in and ARQ settings take effect. No-op when the radio is off. */
+    fun restartLink()
+
+    /** Media volume as a fraction of maximum, or null when the radio is off. */
+    fun outputVolumeFraction(): Float?
+}
