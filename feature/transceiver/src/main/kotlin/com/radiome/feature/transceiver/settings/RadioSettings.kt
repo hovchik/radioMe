@@ -39,6 +39,12 @@ data class RadioSettings(
     val callsign: String = "",
     /** One-tap presets on the compose card. */
     val quickMessages: List<String> = DEFAULT_QUICK_MESSAGES,
+    /** Seal texts, images and files with the group key too (positions are always sealed). */
+    val encryptMessages: Boolean = false,
+    /** Send our position every this many minutes while the radio is on; 0 = only when asked. */
+    val beaconIntervalMin: Int = 0,
+    /** Profile for position beacons: they are tiny, so the robust one costs little. */
+    val beaconProfile: ModemProfile = ModemProfile.ROBUST,
 ) {
     fun sanitized(): RadioSettings = copy(
         leadInMs = leadInMs.coerceIn(ModemConfig.MIN_LEAD_IN_MS, ModemConfig.MAX_LEAD_IN_MS),
@@ -49,6 +55,7 @@ data class RadioSettings(
         outputGainPercent = outputGainPercent.coerceIn(MIN_GAIN, 100),
         imageQuality = imageQuality.coerceIn(ImagePreset.MIN_QUALITY, ImagePreset.MAX_QUALITY),
         callsign = Callsign.normalize(callsign),
+        beaconIntervalMin = beaconIntervalMin.takeIf { it in BEACON_INTERVALS } ?: 0,
         quickMessages = quickMessages.map { it.trim().take(MAX_QUICK_LENGTH) }.filter { it.isNotEmpty() }.distinct().take(MAX_QUICK_MESSAGES),
     )
 
@@ -76,6 +83,7 @@ data class RadioSettings(
             parityRatio = it.parityPercent?.let { p -> p / 100.0 },
             interleaveDepth = it.interleaveDepth,
             station = if (it.callsign.isEmpty() && dest == null) null else StationInfo(it.callsign, dest),
+            encrypt = it.encryptMessages,
         )
     }
 
@@ -94,6 +102,7 @@ data class RadioSettings(
         const val MIN_TURNAROUND = 500
         const val MAX_TURNAROUND = 5000
         const val MIN_GAIN = 10
+        val BEACON_INTERVALS = listOf(0, 5, 15, 30, 60)
         const val MAX_QUICK_MESSAGES = 12
         const val MAX_QUICK_LENGTH = 60
         val DEFAULT_QUICK_MESSAGES = listOf("OK", "Copy that", "Need help", "At position", "Returning to base", "Stand by")

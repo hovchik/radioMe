@@ -17,6 +17,7 @@ core-ktx = "1.16.0"
 datastore = "1.1.7"
 hilt = "2.58"
 hilt-navigation-compose = "1.2.0"
+osmdroid = "6.1.20"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -49,6 +50,7 @@ compose-material-icons-core = { module = "androidx.compose.material:material-ico
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
 hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", version.ref = "hilt-navigation-compose" }
+osmdroid = { module = "org.osmdroid:osmdroid-android", version.ref = "osmdroid" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

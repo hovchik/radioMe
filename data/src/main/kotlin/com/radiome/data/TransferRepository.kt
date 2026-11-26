@@ -4,6 +4,7 @@ import com.radiome.core.protocol.link.Direction
 import com.radiome.core.protocol.link.TransferTelemetry
 import com.radiome.core.protocol.payload.ContentType
 import com.radiome.core.protocol.payload.Payload
+import com.radiome.core.protocol.payload.Position
 import com.radiome.data.db.RadioDatabase
 import com.radiome.data.db.TransferEntity
 import kotlinx.coroutines.flow.Flow
@@ -44,6 +45,7 @@ data class TransferRecord(
     val updatedAt: Long,
     /** Sender of an incoming transfer, addressee of an outgoing one; null = unknown or all stations. */
     val peer: String? = null,
+    val encrypted: Boolean = false,
 )
 
 /**
@@ -60,7 +62,14 @@ class TransferRepository(
 
     fun byId(id: Long): TransferRecord? = dao.byId(id)?.toRecord()
 
-    fun recordOutgoing(sessionId: Int, payload: Payload, totalChunks: Int, profile: String, peer: String? = null): Long {
+    fun recordOutgoing(
+        sessionId: Int,
+        payload: Payload,
+        totalChunks: Int,
+        profile: String,
+        peer: String? = null,
+        encrypted: Boolean = false,
+    ): Long {
         val t = now()
         return dao.insert(
             TransferEntity(
@@ -69,7 +78,7 @@ class TransferRepository(
                 status = TransferStatus.SENDING.name,
                 contentType = payload.type.name,
                 name = payload.name,
-                text = if (payload.type == ContentType.TEXT) payload.asText() else null,
+                text = displayText(payload),
                 payload = payload.bytes,
                 headerBlob = null,
                 totalChunks = totalChunks,
@@ -81,6 +90,7 @@ class TransferRepository(
                 createdAt = t,
                 updatedAt = t,
                 peer = peer,
+                encrypted = encrypted || payload.type == ContentType.POSITION,
             ),
         )
     }
@@ -89,13 +99,21 @@ class TransferRepository(
         it.copy(status = status.name)
     }
 
-    fun markReceived(sessionId: Int, payload: Payload, from: String? = null) = updateLatest(sessionId, Direction.INCOMING) {
+    /** [unreadable]: it came encrypted and could not be opened; [payload] is then the sealed envelope. */
+    fun markReceived(
+        sessionId: Int,
+        payload: Payload,
+        from: String? = null,
+        encrypted: Boolean = false,
+        unreadable: String? = null,
+    ) = updateLatest(sessionId, Direction.INCOMING) {
         it.copy(
             peer = from ?: it.peer,
+            encrypted = encrypted,
             status = TransferStatus.COMPLETE.name,
             contentType = payload.type.name,
             name = payload.name,
-            text = if (payload.type == ContentType.TEXT) payload.asText() else null,
+            text = unreadable?.let { why -> "Encrypted message, not readable here: $why" } ?: displayText(payload),
             payload = payload.bytes,
             receivedChunks = it.totalChunks,
             lossPercent = 0.0,
@@ -127,6 +145,12 @@ class TransferRepository(
         }
     }
 
+    private fun displayText(p: Payload): String? = when (p.type) {
+        ContentType.TEXT -> p.asText()
+        ContentType.POSITION -> Position.decode(p.bytes)?.let { "Position %.5f, %.5f".format(java.util.Locale.ROOT, it.latitude, it.longitude) }
+        else -> null
+    }
+
     companion object {
         /** A session id is only matched to rows touched this recently (ids are 16-bit and get reused). */
         const val RECENT_WINDOW_MS = 12L * 60 * 60 * 1000
@@ -151,4 +175,5 @@ internal fun TransferEntity.toRecord() = TransferRecord(
     createdAt = createdAt,
     updatedAt = updatedAt,
     peer = peer,
+    encrypted = encrypted,
 )

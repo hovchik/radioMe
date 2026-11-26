@@ -18,6 +18,9 @@ import com.radiome.core.protocol.arq.SenderAction
 import com.radiome.core.protocol.arq.SenderPhase
 import com.radiome.core.protocol.arq.SenderSession
 import com.radiome.core.protocol.arq.controlOptions
+import com.radiome.core.protocol.crypto.GroupKey
+import com.radiome.core.protocol.crypto.SecureEnvelope
+import com.radiome.core.protocol.payload.CompressionMode
 import com.radiome.core.protocol.image.ProgressiveImage
 import com.radiome.core.protocol.payload.ContentType
 import com.radiome.core.protocol.payload.Payload
@@ -70,6 +73,12 @@ class LinkController(
         set(value) {
             field = Callsign.normalize(value)
         }
+
+    /**
+     * Pre-shared group key for end-to-end encryption. Positions are only ever sent sealed with it, other payloads
+     * when [TransferOptions.encrypt] is set. Set it on the link thread.
+     */
+    var groupKey: GroupKey? = null
 
     private val fs = ModemConfig.SAMPLE_RATE
     private val demod = engine.createDemodulator()
@@ -144,10 +153,20 @@ class LinkController(
         audio.input.collect { onInput(it) }
     }
 
-    /** Queue [payload] for transmission. Returns the session id. */
+    /**
+     * Queue [payload] for transmission. Returns the session id. Throws [IllegalStateException] when the payload must
+     * be encrypted (a position, or [TransferOptions.encrypt]) and there is no [groupKey].
+     */
     fun send(payload: Payload, options: TransferOptions = TransferOptions()): Int {
+        val seal = options.encrypt || payload.type == ContentType.POSITION
+        val onAir = if (!seal) payload else {
+            val key = groupKey ?: throw IllegalStateException("no group key: set one in Settings to send encrypted")
+            SecureEnvelope.seal(payload, key, callsign)
+        }
+        // Ciphertext does not compress.
+        val opts = stamped(if (seal) options.copy(compression = CompressionMode.NEVER) else options)
         val sid = newSessionId()
-        val sender = SenderSession(Packetizer.packetize(payload, sid, stamped(options)), arq)
+        val sender = SenderSession(Packetizer.packetize(onAir, sid, opts), arq)
         senders[sid] = sender
         startedAt[sid] = nowMs()
         enqueue(sid, sender.initialBursts()) {
@@ -466,6 +485,18 @@ class LinkController(
         enqueue(sid, controlBursts(listOf(Frame(FrameType.PROBE_REPORT, sid, 0, 0, LinkTest.encodeReport(report))), peer)) {}
     }
 
+    private fun received(sid: Int, payload: Payload, peer: StationInfo?): LinkEvent.MessageReceived {
+        val from = peer?.source?.ifEmpty { null }
+        if (payload.type != ContentType.ENCRYPTED) return LinkEvent.MessageReceived(sid, payload, from, peer?.destination)
+        val why = when (val o = SecureEnvelope.open(payload.bytes, groupKey, from ?: "")) {
+            is SecureEnvelope.Opened.Ok -> return LinkEvent.MessageReceived(sid, o.payload, from, peer?.destination, encrypted = true)
+            is SecureEnvelope.Opened.WrongKey -> if (groupKey == null) "no group key set" else "sealed with another group key (id %04X)".format(o.keyId)
+            SecureEnvelope.Opened.Forged -> "failed the integrity check (tampered, or replayed under another callsign)"
+            SecureEnvelope.Opened.Malformed -> "malformed envelope"
+        }
+        return LinkEvent.MessageReceived(sid, payload, from, peer?.destination, encrypted = true, unreadable = why)
+    }
+
     private fun overEnded(sid: Int) {
         val rs = receivers[sid] ?: return
         val peer = peers[sid]
@@ -483,7 +514,7 @@ class LinkController(
                     return
                 }
                 val firstTime = a.firstTime || withheld.remove(sid)
-                if (firstTime) emit(LinkEvent.MessageReceived(sid, a.payload, peer?.source?.ifEmpty { null }, peer?.destination))
+                if (firstTime) emit(received(sid, a.payload, peer))
                 if (arq.sendAck) {
                     enqueue(sid, controlBursts(listOf(rs.ackFrame()), peer?.source)) {}
                     emit(LinkEvent.AckSent(sid))

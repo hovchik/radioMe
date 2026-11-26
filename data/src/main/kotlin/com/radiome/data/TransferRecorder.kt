@@ -4,7 +4,9 @@ import com.radiome.core.protocol.arq.SenderPhase
 import com.radiome.core.protocol.link.Direction
 import com.radiome.core.protocol.link.LinkController
 import com.radiome.core.protocol.link.LinkEvent
+import com.radiome.core.protocol.payload.ContentType
 import com.radiome.core.protocol.payload.Payload
+import com.radiome.core.protocol.payload.Position
 import com.radiome.core.protocol.session.TransferOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -18,12 +20,14 @@ import kotlinx.coroutines.launch
 class TransferRecorder(
     private val link: LinkController,
     private val repository: TransferRepository,
+    private val positions: PositionRepository? = null,
 ) {
     /** Send through the link and record the outgoing transfer. */
     fun send(payload: Payload, options: TransferOptions = TransferOptions()): Int {
         val sid = link.send(payload, options)
         val chunks = link.transfers.value[sid]?.totalChunks ?: 0
-        repository.recordOutgoing(sid, payload, chunks, options.profile.name, options.station?.destination)
+        repository.recordOutgoing(sid, payload, chunks, options.profile.name, options.station?.destination, options.encrypt)
+        if (payload.type == ContentType.POSITION) Position.decode(payload.bytes)?.let { positions?.addOwn(link.callsign, it) }
         return sid
     }
 
@@ -31,7 +35,13 @@ class TransferRecorder(
         launch {
             link.events.collect { e ->
                 when (e) {
-                    is LinkEvent.MessageReceived -> repository.markReceived(e.sessionId, e.payload, e.from)
+                    is LinkEvent.MessageReceived -> {
+                        repository.markReceived(e.sessionId, e.payload, e.from, e.encrypted, e.unreadable)
+                        // Only positions that were sealed with our group key, from an identified station, go on the map.
+                        if (e.payload.type == ContentType.POSITION && e.encrypted && e.unreadable == null && e.from != null) {
+                            Position.decode(e.payload.bytes)?.let { positions?.addReceived(e.from!!, it, link.transfers.value[e.sessionId]?.snrDb) }
+                        }
+                    }
                     is LinkEvent.CorrectionsNeeded -> repository.setIncomingStatus(e.sessionId, TransferStatus.INCOMPLETE)
                     is LinkEvent.Delivered -> repository.setOutgoingStatus(e.sessionId, TransferStatus.DELIVERED)
                     is LinkEvent.Failed -> {

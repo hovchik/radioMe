@@ -73,7 +73,16 @@ sealed interface LinkEvent {
         enum class Kind { INITIAL, REPAIR, POLL }
     }
     /** [from] and [to] come from the sender's STATION frame (null when it sent none; [to] null = all stations). */
-    data class MessageReceived(override val sessionId: Int, val payload: Payload, val from: String? = null, val to: String? = null) : LinkEvent
+    data class MessageReceived(
+        override val sessionId: Int,
+        val payload: Payload,
+        val from: String? = null,
+        val to: String? = null,
+        /** It came encrypted with a group key. With [unreadable] set, [payload] is still the sealed envelope. */
+        val encrypted: Boolean = false,
+        /** Why an encrypted message could not be opened (no key, another group's key, failed check). */
+        val unreadable: String? = null,
+    ) : LinkEvent
     data class AckSent(override val sessionId: Int) : LinkEvent
     /** [by] is the confirming station's callsign, when it identified itself. */
     data class Delivered(override val sessionId: Int, val by: String? = null) : LinkEvent

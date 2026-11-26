@@ -48,8 +48,10 @@ class RoomSessionStore(
             val total = snapshot.totalChunks ?: 0
             val updated = base.copy(
                 headerBlob = headerBlob ?: base.headerBlob,
-                contentType = snapshot.header?.contentType?.name ?: base.contentType,
-                name = snapshot.header?.name ?: base.name,
+                // Once the message is stored (TransferRepository.markReceived), keep its type and name: for a sealed
+                // message they come from inside the envelope, and a later header repeat would put ENCRYPTED back.
+                contentType = if (base.payload != null) base.contentType else snapshot.header?.contentType?.name ?: base.contentType,
+                name = if (base.payload != null) base.name else snapshot.header?.name ?: base.name,
                 totalChunks = total,
                 receivedChunks = snapshot.chunks.size,
                 fecCorrectedBytes = snapshot.fecCorrectedBytes,

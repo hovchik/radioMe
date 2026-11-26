@@ -5,7 +5,15 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStoreFile
+import com.radiome.data.PositionRepository
 import com.radiome.data.TransferRepository
+import com.radiome.feature.transceiver.link.PositionBeacon
+import com.radiome.feature.transceiver.link.PositionHistory
+import com.radiome.feature.transceiver.link.RoomPositionHistory
+import com.radiome.feature.transceiver.location.AndroidLocationSource
+import com.radiome.feature.transceiver.location.LocationSource
+import com.radiome.feature.transceiver.settings.GroupKeyProvider
+import com.radiome.feature.transceiver.settings.KeystoreGroupKeyProvider
 import com.radiome.data.db.RadioDatabase
 import com.radiome.data.store.RoomSessionStore
 import com.radiome.feature.transceiver.image.AndroidImageCodec
@@ -48,7 +56,29 @@ object AppModule {
     fun sessionStore(db: RadioDatabase): RoomSessionStore = RoomSessionStore(db)
 
     @Provides @Singleton
-    fun linkRecording(repository: TransferRepository): LinkRecording = LinkRecording(repository)
+    fun positionRepository(db: RadioDatabase): PositionRepository = PositionRepository(db)
+
+    @Provides @Singleton
+    fun positionHistory(repository: PositionRepository): PositionHistory = RoomPositionHistory(repository)
+
+    @Provides @Singleton
+    fun linkRecording(repository: TransferRepository, positions: PositionRepository): LinkRecording = LinkRecording(repository, positions)
+
+    @Provides @Singleton
+    fun groupKeys(store: DataStore<Preferences>, @AppScope scope: CoroutineScope): GroupKeyProvider =
+        KeystoreGroupKeyProvider(store, scope)
+
+    @Provides @Singleton
+    fun location(@ApplicationContext context: Context): LocationSource = AndroidLocationSource(context)
+
+    @Provides @Singleton
+    fun beacon(
+        client: TransceiverClient,
+        settings: SettingsRepository,
+        keys: GroupKeyProvider,
+        location: LocationSource,
+        @AppScope scope: CoroutineScope,
+    ): PositionBeacon = PositionBeacon(client, settings, keys, location, scope)
 
     @Provides @Singleton
     fun history(repository: TransferRepository): TransferHistory = RoomTransferHistory(repository)

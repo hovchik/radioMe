@@ -17,6 +17,7 @@ import android.util.Log
 import com.radiome.core.dsp.modem.MfskModemEngine
 import com.radiome.core.dsp.modem.ModemConfig
 import com.radiome.core.protocol.arq.ArqConfig
+import com.radiome.core.protocol.crypto.GroupKey
 import com.radiome.core.protocol.link.InMemorySessionStore
 import com.radiome.core.protocol.link.LinkController
 import com.radiome.core.protocol.link.LinkState
@@ -57,6 +58,8 @@ class TransceiverService : Service() {
         val routePreference: RoutePreference get() = RoutePreference.AUTO
         /** Station callsign sent at the start of every burst; blank for none. */
         val callsign: String get() = ""
+        /** Raw 32-byte group key for end-to-end encryption, or null for none. */
+        val groupKey: ByteArray? get() = null
 
         /**
          * Runs on the link thread right after the controller is created, before the UI can reach it. Coroutines
@@ -83,6 +86,7 @@ class TransceiverService : Service() {
 
     // Main-thread state.
     private var linkScope: CoroutineScope? = null
+    @Volatile private var lastStatus = "Listening"
     private var dependencies: Dependencies? = null
     private var engine: AndroidAudioEngine? = null
     private var routeMonitor: AudioRouteMonitor? = null
@@ -153,6 +157,19 @@ class TransceiverService : Service() {
         scope.launch { _link.value?.callsign = callsign }
     }
 
+    /**
+     * Location was just granted while the radio runs: enter the foreground again with the location type, so position
+     * beacons keep getting fixes with the screen off. Call from the visible UI (main thread).
+     */
+    fun refreshForegroundTypes() {
+        if (linkScope == null) return
+        startInForeground(notification(lastStatus))
+    }
+
+    fun setGroupKey(raw: ByteArray?) {
+        scope.launch { _link.value?.groupKey = raw?.let(::GroupKey) }
+    }
+
     private fun startLink() {
         if (linkScope != null) return
         val deps = (application as? DependenciesProvider)?.transceiverDependencies() ?: DefaultDependencies
@@ -167,6 +184,7 @@ class TransceiverService : Service() {
         val controller = LinkController(
             audio, ls, deps.arqConfig, MfskModemEngine(deps.modemConfig), deps.sessionStore, callsign = deps.callsign,
         )
+        controller.groupKey = deps.groupKey?.let(::GroupKey)
 
         linkScope = ls
         dependencies = deps
@@ -186,6 +204,7 @@ class TransceiverService : Service() {
                     LinkState.RECEIVING -> "Receiving"
                     LinkState.TRANSMITTING -> "Transmitting"
                 }
+                lastStatus = text
                 getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
             }
         }
@@ -239,11 +258,14 @@ class TransceiverService : Service() {
 
     private fun startInForeground(n: Notification): Boolean = try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                n,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
-            )
+            var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            // With location granted, position beacons keep working with the screen off.
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            ) {
+                types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            }
+            startForeground(NOTIFICATION_ID, n, types)
         } else {
             startForeground(NOTIFICATION_ID, n)
         }

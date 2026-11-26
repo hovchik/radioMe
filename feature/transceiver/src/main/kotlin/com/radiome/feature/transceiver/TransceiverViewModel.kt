@@ -15,6 +15,11 @@ import com.radiome.data.TransferRecord
 import com.radiome.feature.transceiver.image.ImageCodec
 import com.radiome.feature.transceiver.link.TransceiverClient
 import com.radiome.feature.transceiver.link.TransferHistory
+import com.radiome.feature.transceiver.link.PositionBeacon
+import com.radiome.feature.transceiver.link.PositionHistory
+import com.radiome.feature.transceiver.settings.GroupKeyProvider
+import com.radiome.core.protocol.crypto.GroupKey
+import com.radiome.data.StationPosition
 import com.radiome.feature.transceiver.settings.RadioSettings
 import com.radiome.feature.transceiver.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -44,6 +49,9 @@ class TransceiverViewModel @Inject constructor(
     private val history: TransferHistory,
     private val settingsRepository: SettingsRepository,
     private val codec: ImageCodec,
+    private val positionHistory: PositionHistory,
+    private val keys: GroupKeyProvider,
+    private val beacon: PositionBeacon,
 ) : ViewModel() {
     /** Where image work (resize, WebP encode) runs. Tests replace it. */
     internal var workDispatcher: CoroutineDispatcher = Dispatchers.Default
@@ -80,6 +88,9 @@ class TransceiverViewModel @Inject constructor(
             delay(TICK_MS)
         }
     }
+
+    /** Wall clock for "3 min ago" labels, ticking every couple of seconds while observed. */
+    val now: StateFlow<Long> = ticker.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), System.currentTimeMillis())
 
     val radio: StateFlow<RadioUi> = combine(
         combine(client.running, client.linkState, client.route, ::Triple),
@@ -151,6 +162,61 @@ class TransceiverViewModel @Inject constructor(
         }
     }
 
+    // ------------------------------------------------------------------------------------------ map and encryption
+
+    /** Latest decrypted fix per station, ours included. */
+    val positions: StateFlow<List<StationPosition>> =
+        positionHistory.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val groupKey: StateFlow<GroupKey?> = keys.key
+
+    private val _keyBusy = MutableStateFlow(false)
+    /** Deriving a key from a passphrase takes a moment. */
+    val keyBusy: StateFlow<Boolean> = _keyBusy.asStateFlow()
+
+    fun setGroupPassphrase(passphrase: String) {
+        if (_keyBusy.value) return
+        viewModelScope.launch {
+            _keyBusy.value = true
+            try {
+                val k = keys.setPassphrase(passphrase)
+                client.setGroupKey(k)
+                _messages.trySend("Group key set. Fingerprint ${k.fingerprint}: compare it with the other stations.")
+            } catch (e: IllegalArgumentException) {
+                _messages.trySend("Use a passphrase of at least ${GroupKey.MIN_PASSPHRASE} characters.")
+            } finally {
+                _keyBusy.value = false
+            }
+        }
+    }
+
+    fun clearGroupKey() = viewModelScope.launch {
+        keys.clear()
+        client.setGroupKey(null)
+        _messages.trySend("Group key removed. Positions can no longer be sent or read.")
+    }
+
+    /** The location prompt was answered with a yes: let the running radio keep locating in the background, then send. */
+    fun onLocationPermissionGranted() {
+        client.onLocationGranted()
+        sendPositionNow()
+    }
+
+    fun sendPositionNow() = viewModelScope.launch {
+        _messages.trySend(Presenters.beaconMessage(beacon.sendNow()))
+    }
+
+    fun clearPositions() = viewModelScope.launch { positionHistory.clear() }
+
+    /** False (with a notice) when settings ask for encryption but no group key is set. */
+    private fun encryptionReady(): Boolean {
+        if (settings.value.encryptMessages && keys.key.value == null) {
+            _messages.trySend("Encryption is on but no group key is set. Set one in Settings or turn encryption off.")
+            return false
+        }
+        return true
+    }
+
     fun startListening() = client.startListening()
 
     fun stopListening() {
@@ -197,7 +263,7 @@ class TransceiverViewModel @Inject constructor(
 
     /** One-tap preset: goes out right away with the chosen profile and addressee, leaving the draft alone. */
     fun sendQuickMessage(text: String) {
-        if (text.isBlank()) return
+        if (text.isBlank() || !encryptionReady()) return
         viewModelScope.launch {
             warnIfMuted()
             val c = _compose.value
@@ -220,7 +286,7 @@ class TransceiverViewModel @Inject constructor(
 
     fun sendText() {
         val c = _compose.value
-        if (c.draft.isBlank() || c.sending) return
+        if (c.draft.isBlank() || c.sending || !encryptionReady()) return
         viewModelScope.launch {
             _compose.update { it.copy(sending = true) }
             warnIfMuted()
@@ -305,7 +371,7 @@ class TransceiverViewModel @Inject constructor(
     fun sendImage() {
         val p = prepared ?: return
         val c = _compose.value
-        if (c.sending || c.image?.busy == true) return
+        if (c.sending || c.image?.busy == true || !encryptionReady()) return
         viewModelScope.launch {
             _compose.update { it.copy(sending = true) }
             val options = settings.value.transferOptions(c.profile, c.to).copy(compression = CompressionMode.NEVER)

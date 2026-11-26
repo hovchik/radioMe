@@ -11,6 +11,8 @@ import com.radiome.core.protocol.link.ProbeResult
 import com.radiome.core.protocol.payload.CompressionMode
 import com.radiome.core.protocol.payload.ContentType
 import com.radiome.feature.transceiver.settings.SettingsRepository
+import com.radiome.feature.transceiver.link.PositionBeacon
+import com.radiome.core.protocol.payload.Position
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +44,9 @@ class TransceiverViewModelTest {
     private lateinit var scope: CoroutineScope
     private lateinit var settings: SettingsRepository
     private lateinit var vm: TransceiverViewModel
+    private val keys = FakeKeys()
+    private val location = FakeLocation()
+    private lateinit var beacon: PositionBeacon
 
     @Before
     fun setUp() {
@@ -49,7 +54,9 @@ class TransceiverViewModelTest {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         val file = tmp.newFolder().resolve("s.preferences_pb")
         settings = SettingsRepository(PreferenceDataStoreFactory.create(scope = scope, produceFile = { file }), scope)
-        vm = TransceiverViewModel(client, FakeHistory(), settings, codec).apply { workDispatcher = Dispatchers.Unconfined }
+        beacon = PositionBeacon(client, settings, keys, location, scope)
+        vm = TransceiverViewModel(client, FakeHistory(), settings, codec, FakePositions(), keys, beacon)
+            .apply { workDispatcher = Dispatchers.Unconfined }
     }
 
     @After
@@ -216,5 +223,50 @@ class TransceiverViewModelTest {
         waitUntil { vm.linkTest.value.error != null }
         assertEquals(2, client.linkTests)
         assertTrue(LinkTest.order.isNotEmpty())
+    }
+
+    @Test
+    fun positionsAreSentOnlyEncryptedAndOnlyWithAKey() = runBlocking {
+        client.startListening()
+        vm.sendPositionNow()
+        assertTrue(withTimeout(2_000) { vm.messages.first() }.startsWith("Set a group key"))
+        assertTrue(client.sent.isEmpty())
+
+        vm.setGroupPassphrase("short")
+        assertTrue(withTimeout(2_000) { vm.messages.first() }.contains("at least"))
+        vm.setGroupPassphrase("our group passphrase")
+        assertTrue(withTimeout(5_000) { vm.messages.first() }.contains("Fingerprint"))
+        assertEquals(keys.key.value, client.lastGroupKey)
+
+        location.permitted = false
+        vm.sendPositionNow()
+        assertTrue(withTimeout(2_000) { vm.messages.first() }.contains("location access"))
+        location.permitted = true
+        vm.sendPositionNow()
+        assertTrue(withTimeout(2_000) { vm.messages.first() }.startsWith("Encrypted position sent"))
+        val (payload, options) = client.sent.single()
+        assertEquals(ContentType.POSITION, payload.type)
+        assertTrue(options.encrypt)
+        assertEquals(64, options.chunkPayloadSize)
+        assertEquals(40.1776, Position.decode(payload.bytes)!!.latitude, 1e-7)
+
+        vm.clearGroupKey()
+        withTimeout(2_000) { vm.messages.first() }
+        assertNull(client.lastGroupKey)
+    }
+
+    @Test
+    fun encryptMessagesNeedsAKey() = runBlocking {
+        client.startListening()
+        vm.updateSettings { it.copy(encryptMessages = true) }
+        waitUntil { settings.settings.value.encryptMessages }
+        vm.onDraftChange("secret plan")
+        vm.sendText()
+        assertTrue(withTimeout(2_000) { vm.messages.first() }.contains("no group key"))
+        assertTrue(client.sent.isEmpty())
+        keys.setPassphrase("our group passphrase")
+        vm.sendText()
+        waitUntil { client.sent.size == 1 }
+        assertTrue(client.sent.single().second.encrypt)
     }
 }

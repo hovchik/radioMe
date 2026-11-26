@@ -18,6 +18,8 @@ data class TransferOptions(
     val maxFramesPerBurst: Int = 64,
     /** When set, every burst starts with a STATION frame (callsign and destination). */
     val station: StationInfo? = null,
+    /** Seal the payload with the link's group key (AES-256-GCM). Positions are always sealed. */
+    val encrypt: Boolean = false,
 ) {
     init {
         require(chunkPayloadSize in MIN_CHUNK..MAX_CHUNK) { "chunk payload must be $MIN_CHUNK..$MAX_CHUNK" }

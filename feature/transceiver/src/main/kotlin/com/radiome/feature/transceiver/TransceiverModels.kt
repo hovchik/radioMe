@@ -237,6 +237,8 @@ object Presenters {
                 ContentType.TEXT -> "Message$from: " + e.payload.asText().take(60)
                 ContentType.IMAGE_WEBP, ContentType.IMAGE_PROGRESSIVE -> "Image received$from (${e.payload.bytes.size} bytes)"
                 ContentType.BINARY -> "File received$from (${e.payload.bytes.size} bytes)"
+                ContentType.POSITION -> if (e.encrypted) "Position received$from" else null
+                ContentType.ENCRYPTED -> "Encrypted message$from could not be opened: ${e.unreadable ?: "unknown reason"}"
             }
         }
         is LinkEvent.Delivered -> (e.by?.let { "Delivered: $it confirmed transfer %04X" } ?: "Delivered: the other station confirmed transfer %04X")
@@ -267,6 +269,28 @@ object Presenters {
     /** Merge a STATION frame into the heard list: newest first, at most [max] stations. */
     fun heard(list: List<HeardStation>, callsign: String, now: Long, snrDb: Double, max: Int = 12): List<HeardStation> =
         (listOf(HeardStation(callsign, now, snrDb)) + list.filterNot { it.callsign == callsign }).take(max)
+
+    /** "3 min ago" style age for map markers and lists. */
+    fun formatAge(ageMs: Long): String {
+        val s = (ageMs / 1000).coerceAtLeast(0)
+        return when {
+            s < 60 -> "just now"
+            s < 3600 -> "${s / 60} min ago"
+            s < 86_400 -> "${s / 3600} h ago"
+            else -> "${s / 86_400} d ago"
+        }
+    }
+
+    fun formatCoordinates(lat: Double, lon: Double): String =
+        "%.5f° %s, %.5f° %s".format(java.util.Locale.ROOT, kotlin.math.abs(lat), if (lat >= 0) "N" else "S", kotlin.math.abs(lon), if (lon >= 0) "E" else "W")
+
+    fun beaconMessage(r: com.radiome.feature.transceiver.link.PositionBeacon.Result): String = when (r) {
+        is com.radiome.feature.transceiver.link.PositionBeacon.Result.Sent -> "Encrypted position sent: " + formatCoordinates(r.position.latitude, r.position.longitude)
+        com.radiome.feature.transceiver.link.PositionBeacon.Result.NoKey -> "Set a group key in Settings first. Positions are only ever sent encrypted."
+        com.radiome.feature.transceiver.link.PositionBeacon.Result.NoPermission -> "Allow location access to send your position."
+        com.radiome.feature.transceiver.link.PositionBeacon.Result.NoFix -> "No GPS fix yet. Check that location is on and try again outdoors."
+        com.radiome.feature.transceiver.link.PositionBeacon.Result.RadioOff -> "Turn the radio on first."
+    }
 
     fun formatBytes(n: Int): String = if (n < 1024) "$n B" else "%.1f KB".format(n / 1024.0)
 }

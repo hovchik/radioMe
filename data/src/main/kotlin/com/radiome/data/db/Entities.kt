@@ -1,5 +1,6 @@
 package com.radiome.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -37,6 +38,8 @@ data class TransferEntity(
     val updatedAt: Long,
     /** The other station's callsign: who sent an incoming transfer, who an outgoing one is for (null = all). */
     val peer: String? = null,
+    /** It travelled sealed with the group key. */
+    @ColumnInfo(defaultValue = "0") val encrypted: Boolean = false,
 )
 
 /** A received chunk of an incoming transfer. */
