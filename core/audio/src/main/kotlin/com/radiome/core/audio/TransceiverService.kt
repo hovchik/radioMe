@@ -326,6 +326,8 @@ class TransceiverService : Service() {
             .setContentText(status)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            // Status and the Stop button on the lock screen too; nothing private is shown.
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .addAction(Notification.Action.Builder(null, "Stop", stop).build())
         launchIntent?.let {
             builder.setContentIntent(PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))

@@ -29,6 +29,9 @@ class RadioMeApp : Application(), TransceiverService.DependenciesProvider {
     override fun onCreate() {
         super.onCreate()
         beacon.start()
+        // A new process means the radio is off, even if the last one was killed without stopping the link (Task
+        // Manager, low memory): put the widget and the tile back to "off" so they offer Start again.
+        RadioControls.onRunningChanged(this, false)
     }
 
     /** The service asks for this each time the link starts, so new settings apply on the next start or restart. */
@@ -47,9 +50,15 @@ class RadioMeApp : Application(), TransceiverService.DependenciesProvider {
             override val callsign: String = s.callsign
             override val groupKey: ByteArray? = keys.current()?.encoded()
 
-            override fun onLinkStarted(link: LinkController, scope: CoroutineScope) = rec.attach(link, scope)
+            override fun onLinkStarted(link: LinkController, scope: CoroutineScope) {
+                rec.attach(link, scope)
+                RadioControls.onRunningChanged(this@RadioMeApp, true)
+            }
 
-            override fun onLinkStopped(link: LinkController) = rec.detach(link)
+            override fun onLinkStopped(link: LinkController) {
+                rec.detach(link)
+                RadioControls.onRunningChanged(this@RadioMeApp, false)
+            }
         }
     }
 }

@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">RadioMe</string>
+    <string name="widget_on">Radio on, listening</string>
+    <string name="widget_off">Radio off</string>
+    <string name="action_listen">Listen</string>
+    <string name="action_stop">Stop</string>
+    <string name="widget_description">Turn the radio link on or off</string>
 </resources>
