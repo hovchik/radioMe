@@ -428,7 +428,7 @@ private fun ComposeCard(
 }
 
 @Composable
-private fun Recording(recording: RecordingUi, actions: VoiceActions) {
+internal fun Recording(recording: RecordingUi, actions: VoiceActions) {
     Text(
         tr("Recording... %d s", recording.elapsedMs / 1000),
         style = MaterialTheme.typography.titleSmall,
@@ -442,7 +442,7 @@ private fun Recording(recording: RecordingUi, actions: VoiceActions) {
 }
 
 @Composable
-private fun VoiceDraft(voice: VoiceDraftUi, sending: Boolean, running: Boolean, actions: VoiceActions) {
+internal fun VoiceDraft(voice: VoiceDraftUi, sending: Boolean, running: Boolean, actions: VoiceActions) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = actions.onPlay) { Icon(Icons.Filled.PlayArrow, contentDescription = tr("Play")) }
         Text(
@@ -464,7 +464,7 @@ private fun VoiceDraft(voice: VoiceDraftUi, sending: Boolean, running: Boolean, 
 }
 
 @Composable
-private fun FileDraft(file: FileDraftUi, sending: Boolean, running: Boolean, actions: FileActions) {
+internal fun FileDraft(file: FileDraftUi, sending: Boolean, running: Boolean, actions: FileActions) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(file.name, style = MaterialTheme.typography.titleSmall)
@@ -495,7 +495,7 @@ private fun FileDraft(file: FileDraftUi, sending: Boolean, running: Boolean, act
 }
 
 @Composable
-private fun ImageDraft(
+internal fun ImageDraft(
     image: ImageDraftUi,
     sending: Boolean,
     running: Boolean,

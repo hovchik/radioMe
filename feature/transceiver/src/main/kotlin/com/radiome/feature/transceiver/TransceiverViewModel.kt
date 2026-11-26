@@ -127,6 +127,40 @@ class TransceiverViewModel @Inject constructor(
     /** Stations heard on the air (from their STATION frames), newest first. */
     val heardStations: StateFlow<List<HeardStation>> = _heard.asStateFlow()
 
+    // ------------------------------------------------------------------------------------------ chat
+
+    /** Messages that arrived before this screen was opened count as read. */
+    private val chatOpenedAt = System.currentTimeMillis()
+    private val chatRead = MutableStateFlow<Map<String, Long>>(emptyMap())
+
+    /** The chat list: "All stations", then one conversation per station. */
+    val chatThreads: StateFlow<List<ChatThread>> = combine(historyItems, _heard, chatRead) { records, heard, read ->
+        Chat.threads(records, heard, read, chatOpenedAt)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Open a conversation: what is composed from here on goes to [peer] (null = every station). */
+    fun openChat(peer: String?) {
+        onToChange(peer.orEmpty())
+        markChatRead(peer)
+    }
+
+    fun markChatRead(peer: String?) {
+        chatRead.update { it + (Chat.key(peer) to System.currentTimeMillis()) }
+    }
+
+    /** Send a failed or cancelled message again, to the same station, with the profile chosen now. */
+    fun resend(r: TransferRecord) {
+        val bytes = r.payload ?: return
+        val type = r.contentType ?: return
+        if (!encryptionReady()) return
+        viewModelScope.launch {
+            warnIfMuted()
+            var options = settings.value.transferOptions(_compose.value.profile, r.peer)
+            if (type != ContentType.TEXT && type != ContentType.BINARY) options = options.copy(compression = CompressionMode.NEVER)
+            if (dispatch(Payload(type, bytes, r.name), options) == null) _messages.trySend(tr("Turn the radio on first."))
+        }
+    }
+
     private val _linkTest = MutableStateFlow(LinkTestUi())
     val linkTest: StateFlow<LinkTestUi> = _linkTest.asStateFlow()
 
