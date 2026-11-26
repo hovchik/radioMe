@@ -1,5 +1,6 @@
 package com.radiome.feature.transceiver.ui
 
+import com.radiome.feature.transceiver.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,7 +50,7 @@ class HistoryActions(
 fun HistoryScreen(items: List<TransferRecord>, actions: HistoryActions, modifier: Modifier = Modifier) {
     if (items.isEmpty()) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Nothing sent or received yet.", style = MaterialTheme.typography.bodyLarge)
+            Text(tr("Nothing sent or received yet."), style = MaterialTheme.typography.bodyLarge)
         }
         return
     }
@@ -63,9 +64,9 @@ fun HistoryScreen(items: List<TransferRecord>, actions: HistoryActions, modifier
                 OutlinedButton(onClick = actions.onShareLog) {
                     Icon(Icons.Filled.Share, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
-                    Text("Share log")
+                    Text(tr("Share log"))
                 }
-                OutlinedButton(onClick = actions.onSaveLog) { Text("Save log as file") }
+                OutlinedButton(onClick = actions.onSaveLog) { Text(tr("Save log as file")) }
             }
         }
         items(items, key = { it.id }) { HistoryRow(it, actions) }
@@ -78,27 +79,27 @@ private fun HistoryRow(r: TransferRecord, actions: HistoryActions) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val dir = if (r.direction == Direction.OUTGOING) "Sent" else "Received"
+                val dir = if (r.direction == Direction.OUTGOING) tr("Sent") else tr("Received")
                 Column(Modifier.weight(1f)) {
                     val who = when (r.direction) {
-                        Direction.INCOMING -> r.peer?.let { " from $it" } ?: ""
-                        Direction.OUTGOING -> r.peer?.let { " to $it" } ?: ""
+                        Direction.INCOMING -> r.peer?.let { tr(" from %s", it) } ?: ""
+                        Direction.OUTGOING -> r.peer?.let { tr(" to %s", it) } ?: ""
                     }
-                    val lock = if (r.encrypted) " · encrypted" else ""
+                    val lock = if (r.encrypted) tr(" · encrypted") else ""
                     Text("$dir$who · ${statusLabel(r.status)}$lock", style = MaterialTheme.typography.titleSmall)
                     Text(
                         "$time · %04X".format(r.sessionId) + (r.profile?.let { " · ${it.lowercase()}" } ?: ""),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                IconButton(onClick = { actions.onDelete(r.id) }) { Icon(Icons.Filled.Delete, contentDescription = "Delete") }
+                IconButton(onClick = { actions.onDelete(r.id) }) { Icon(Icons.Filled.Delete, contentDescription = tr("Delete")) }
             }
             when {
                 r.contentType == ContentType.TEXT && r.text != null -> Text(r.text!!, style = MaterialTheme.typography.bodyLarge)
                 r.contentType?.isImage == true && r.payload != null ->
                     PayloadImage(displayImageBytes(r.contentType, r.payload!!), "Image ${r.name}", Modifier.fillMaxWidth().heightIn(max = 240.dp))
                 r.contentType == ContentType.BINARY && r.payload != null ->
-                    Text("File ${r.name.ifBlank { "without name" }} · ${Presenters.formatBytes(r.payload!!.size)}", style = MaterialTheme.typography.bodyLarge)
+                    Text(tr("File %s · %s", r.name.ifBlank { tr("without name") }, Presenters.formatBytes(r.payload!!.size)), style = MaterialTheme.typography.bodyLarge)
                 r.payload != null -> Text("${r.payload!!.size} bytes ${r.name}")
                 else -> Unit
             }
@@ -106,9 +107,9 @@ private fun HistoryRow(r: TransferRecord, actions: HistoryActions) {
             if (savable) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (r.contentType?.isImage == true) {
-                        OutlinedButton(onClick = { actions.onSaveToGallery(r) }) { Text("Save to gallery") }
+                        OutlinedButton(onClick = { actions.onSaveToGallery(r) }) { Text(tr("Save to gallery")) }
                     }
-                    OutlinedButton(onClick = { actions.onSave(r) }) { Text("Save as file") }
+                    OutlinedButton(onClick = { actions.onSave(r) }) { Text(tr("Save as file")) }
                 }
             }
             if (r.direction == Direction.OUTGOING) Receipt(r)
@@ -128,25 +129,25 @@ private fun HistoryRow(r: TransferRecord, actions: HistoryActions) {
 private fun Receipt(r: TransferRecord) {
     val (text, color) = when (r.status) {
         TransferStatus.DELIVERED -> {
-            val who = r.deliveredTo.map { if (it == "?") "a station without callsign" else it }
-            ("Delivered" + if (who.isEmpty()) "" else " to " + who.joinToString(", ")) to RadioColors.ok
+            val who = r.deliveredTo.map { if (it == "?") tr("a station without callsign") else it }
+            (if (who.isEmpty()) tr("Delivered") else tr("Delivered to %s", who.joinToString(", "))) to RadioColors.ok
         }
         TransferStatus.SENDING -> (
-            if (r.deliveredTo.isEmpty()) "Sent, waiting for confirmation" else "Confirmed so far by " + r.deliveredTo.joinToString(", ")
+            if (r.deliveredTo.isEmpty()) tr("Sent, waiting for confirmation") else tr("Confirmed so far by %s", r.deliveredTo.joinToString(", "))
             ) to MaterialTheme.colorScheme.onSurfaceVariant
-        TransferStatus.FAILED -> "Not delivered" to RadioColors.missing
-        TransferStatus.CANCELLED -> "Cancelled" to MaterialTheme.colorScheme.onSurfaceVariant
+        TransferStatus.FAILED -> tr("Not delivered") to RadioColors.missing
+        TransferStatus.CANCELLED -> tr("Cancelled") to MaterialTheme.colorScheme.onSurfaceVariant
         else -> return
     }
     Text(text, style = MaterialTheme.typography.bodyMedium, color = color)
 }
 
 private fun statusLabel(s: TransferStatus): String = when (s) {
-    TransferStatus.SENDING -> "sending"
-    TransferStatus.DELIVERED -> "delivered"
-    TransferStatus.RECEIVING -> "receiving"
-    TransferStatus.INCOMPLETE -> "incomplete"
-    TransferStatus.COMPLETE -> "complete"
-    TransferStatus.FAILED -> "failed"
-    TransferStatus.CANCELLED -> "cancelled"
+    TransferStatus.SENDING -> tr("sending")
+    TransferStatus.DELIVERED -> tr("delivered")
+    TransferStatus.RECEIVING -> tr("receiving")
+    TransferStatus.INCOMPLETE -> tr("incomplete")
+    TransferStatus.COMPLETE -> tr("complete")
+    TransferStatus.FAILED -> tr("failed")
+    TransferStatus.CANCELLED -> tr("cancelled")
 }

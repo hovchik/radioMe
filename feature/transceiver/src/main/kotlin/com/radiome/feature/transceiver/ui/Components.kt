@@ -1,5 +1,6 @@
 package com.radiome.feature.transceiver.ui
 
+import com.radiome.feature.transceiver.i18n.tr
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -62,7 +63,7 @@ fun LevelMeter(dbfs: Double, level: InputLevel, modifier: Modifier = Modifier) {
         InputLevel.GOOD -> RadioColors.ok
         InputLevel.HOT -> RadioColors.missing
     }
-    val label = if (dbfs.isInfinite() || dbfs.isNaN()) "no signal" else "%.0f dBFS".format(dbfs)
+    val label = if (dbfs.isInfinite() || dbfs.isNaN()) tr("no signal") else "%.0f dBFS".format(dbfs)
     Canvas(
         modifier
             .fillMaxWidth()
@@ -127,7 +128,7 @@ fun TransferCardView(
     Card(modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val arrow = if (card.direction == Direction.OUTGOING) "Sending" else "Receiving"
+                val arrow = if (card.direction == Direction.OUTGOING) tr("Sending") else tr("Receiving")
                 val who = when {
                     card.direction == Direction.INCOMING -> card.peer?.let { " from $it" } ?: ""
                     else -> " to " + (card.peer ?: "all")
@@ -148,7 +149,7 @@ fun TransferCardView(
             val snr = if (card.snrDb.isNaN()) "-" else "%.1f dB".format(card.snrDb)
             StatLine("${card.receivedChunks}/${card.totalChunks} chunks · loss %.1f%% · SNR $snr".format(card.lossPercent))
             StatLine("FEC fixed ${card.fecCorrectedBytes} B in ${card.fecRepairedChunks} chunks · repair rounds ${card.repairRounds}")
-            val missing = if (card.missing.isEmpty()) "Missing: none" else
+            val missing = if (card.missing.isEmpty()) tr("Missing: none") else
                 "Missing ${card.missing.size}: " + card.missing.take(12).joinToString(", ") + if (card.missing.size > 12) " ..." else ""
             StatLine(missing, if (card.missing.isEmpty()) null else RadioColors.missing)
             if (card.ackedBy.isNotEmpty()) StatLine("Confirmed by " + card.ackedBy.joinToString(", "), RadioColors.ok)
@@ -158,14 +159,14 @@ fun TransferCardView(
                     OutlinedButton(onClick = onRequestCorrections) {
                         Icon(Icons.Filled.Refresh, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Send correction request")
+                        Text(tr("Send correction request"))
                     }
                 }
                 if (card.canCancel) {
                     TextButton(onClick = onCancel) {
                         Icon(Icons.Filled.Close, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Cancel")
+                        Text(tr("Cancel"))
                     }
                 }
             }
@@ -185,14 +186,14 @@ private fun StatLine(text: String, color: Color? = null) {
 }
 
 fun phaseLabel(phase: String): String = when (phase) {
-    "RECEIVING" -> "Receiving"
-    "AWAITING_REPAIR" -> "Incomplete"
-    "COMPLETE" -> "Complete"
-    "CORRUPT" -> "Corrupt"
-    "TRANSMITTING" -> "On air"
-    "AWAITING_RESPONSE" -> "Waiting for reply"
-    "FAILED" -> "Failed"
-    "CANCELLED" -> "Cancelled"
+    "RECEIVING" -> tr("Receiving")
+    "AWAITING_REPAIR" -> tr("Incomplete")
+    "COMPLETE" -> tr("Complete")
+    "CORRUPT" -> tr("Corrupt")
+    "TRANSMITTING" -> tr("On air")
+    "AWAITING_RESPONSE" -> tr("Waiting for reply")
+    "FAILED" -> tr("Failed")
+    "CANCELLED" -> tr("Cancelled")
     else -> phase.lowercase().replaceFirstChar { it.uppercase() }
 }
 
@@ -201,7 +202,7 @@ fun phaseLabel(phase: String): String = when (phase) {
 fun PayloadImage(bytes: ByteArray, description: String, modifier: Modifier = Modifier) {
     val bitmap = remember(bytes) { decodeImage(bytes)?.asImageBitmap() }
     if (bitmap == null) {
-        Text("Image could not be decoded", color = RadioColors.missing, modifier = modifier)
+        Text(tr("Image could not be decoded"), color = RadioColors.missing, modifier = modifier)
         return
     }
     Image(
@@ -221,7 +222,7 @@ fun PayloadImage(bytes: ByteArray, description: String, modifier: Modifier = Mod
 fun ProgressivePreview(preview: ImagePreview, modifier: Modifier = Modifier) {
     val base = remember(preview.complete) { preview.complete?.let { decodeImage(it)?.asImageBitmap() } }
     val top = remember(preview.partial?.size) { preview.partial?.let { decodePartialImage(it)?.asImageBitmap() } }
-    Box(modifier.semantics { contentDescription = "Image arriving, preview" }) {
+    Box(modifier.semantics { contentDescription = tr("Image arriving, preview") }) {
         val fill = Modifier.matchParentSize()
         base?.let {
             Image(it, null, fill, contentScale = ContentScale.Fit, filterQuality = if (preview.isFinal) FilterQuality.None else FilterQuality.High)

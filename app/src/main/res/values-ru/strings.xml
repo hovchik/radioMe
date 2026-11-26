@@ -1,0 +1,7 @@
+<resources>
+    <string name="widget_on">Радио включено, слушаю</string>
+    <string name="widget_off">Радио выключено</string>
+    <string name="action_listen">Слушать</string>
+    <string name="action_stop">Стоп</string>
+    <string name="widget_description">Включение и выключение радиосвязи</string>
+</resources>

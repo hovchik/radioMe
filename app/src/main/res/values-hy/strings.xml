@@ -1,0 +1,7 @@
+<resources>
+    <string name="widget_on">Ռադիոն միացված է, լսում եմ</string>
+    <string name="widget_off">Ռադիոն անջատված է</string>
+    <string name="action_listen">Լսել</string>
+    <string name="action_stop">Կանգնեցնել</string>
+    <string name="widget_description">Միացնել կամ անջատել ռադիոկապը</string>
+</resources>

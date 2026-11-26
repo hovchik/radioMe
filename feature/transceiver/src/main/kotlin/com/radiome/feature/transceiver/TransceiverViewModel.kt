@@ -1,5 +1,6 @@
 package com.radiome.feature.transceiver
 
+import com.radiome.feature.transceiver.i18n.tr
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.radiome.core.dsp.modem.ModemProfile
@@ -131,7 +132,7 @@ class TransceiverViewModel @Inject constructor(
         warnIfMuted()
         val sid = client.startLinkTest(_compose.value.to.ifBlank { null })
         if (sid == null) {
-            _messages.trySend("Turn the radio on first.")
+            _messages.trySend(tr("Turn the radio on first."))
         } else {
             _linkTest.value = LinkTestUi(running = true, sessionId = sid)
         }
@@ -143,7 +144,7 @@ class TransceiverViewModel @Inject constructor(
         updateSettings { it.copy(defaultProfile = r.profile, parityPercent = r.parityPercent) }
         rate.reset(r.profile)
         onProfileChange(r.profile, keepAuto = true)
-        _messages.trySend("Now sending ${Presenters.recommendationLabel(r)} by default.")
+        _messages.trySend(tr("Now sending %s by default.", Presenters.recommendationLabel(r)))
     }
 
     fun dismissLinkTest() {
@@ -170,7 +171,7 @@ class TransceiverViewModel @Inject constructor(
         val next = rate.onOutcome(t.profile, if (failed) 100.0 else t.firstLoss ?: 0.0, failed)
         if (_compose.value.auto && next != _compose.value.profile) {
             onProfileChange(next, keepAuto = true)
-            _messages.trySend("Auto speed: now ${com.radiome.feature.transceiver.ui.profileLabel(next)}.")
+            _messages.trySend(tr("Auto speed: now %s.", com.radiome.feature.transceiver.ui.profileLabel(next)))
         }
     }
 
@@ -213,7 +214,7 @@ class TransceiverViewModel @Inject constructor(
 
     private fun enqueue(label: String, payload: Payload, options: TransferOptions, auto: Boolean) {
         _queue.update { it + QueuedItem(++queueIds, label, payload, options, auto) }
-        if (!client.running.value) _messages.trySend("Queued. It goes out when the radio is on.")
+        if (!client.running.value) _messages.trySend(tr("Queued. It goes out when the radio is on."))
     }
 
     private suspend fun runQueue() {
@@ -227,14 +228,14 @@ class TransceiverViewModel @Inject constructor(
             // The group key may have been removed since this was queued: drop it with a notice rather than send it in clear.
             if (options.encrypt && keys.key.value == null) {
                 _queue.update { q -> q.filterNot { it.id == next.id } }
-                _messages.trySend("Removed \"${next.label}\" from the queue: it was to go encrypted, but no group key is set now.")
+                _messages.trySend(tr("Removed \"%s\" from the queue: it was to go encrypted, but no group key is set now.", next.label))
                 continue
             }
             val sid = try {
                 dispatch(next.payload, options)
             } catch (e: IllegalStateException) {
                 _queue.update { q -> q.filterNot { it.id == next.id } }
-                _messages.trySend("Could not send \"${next.label}\": ${e.message}")
+                _messages.trySend(tr("Could not send \"%s\": %s", next.label, e.message ?: ""))
                 continue
             } ?: continue // the radio went off; try again when it is back
             _queue.update { q -> q.filterNot { it.id == next.id } }
@@ -288,7 +289,7 @@ class TransceiverViewModel @Inject constructor(
                 }
             }
             is LinkEvent.LinkTestFailed -> if (_linkTest.value.sessionId == e.sessionId) {
-                _linkTest.value = LinkTestUi(sessionId = e.sessionId, error = "No report came back. Is the other station listening?")
+                _linkTest.value = LinkTestUi(sessionId = e.sessionId, error = tr("No report came back. Is the other station listening?"))
             }
             else -> Unit
         }
@@ -313,9 +314,9 @@ class TransceiverViewModel @Inject constructor(
             try {
                 val k = keys.setPassphrase(passphrase)
                 client.setGroupKey(k)
-                _messages.trySend("Group key set. Fingerprint ${k.fingerprint}: compare it with the other stations.")
+                _messages.trySend(tr("Group key set. Fingerprint %s: compare it with the other stations.", k.fingerprint))
             } catch (e: IllegalArgumentException) {
-                _messages.trySend("Use a passphrase of at least ${GroupKey.MIN_PASSPHRASE} characters.")
+                _messages.trySend(tr("Use a passphrase of at least %d characters.", GroupKey.MIN_PASSPHRASE))
             } finally {
                 _keyBusy.value = false
             }
@@ -325,7 +326,7 @@ class TransceiverViewModel @Inject constructor(
     fun clearGroupKey() = viewModelScope.launch {
         keys.clear()
         client.setGroupKey(null)
-        _messages.trySend("Group key removed. Positions can no longer be sent or read.")
+        _messages.trySend(tr("Group key removed. Positions can no longer be sent or read."))
     }
 
     /** The location prompt was answered with a yes: let the running radio keep locating in the background, then send. */
@@ -343,7 +344,7 @@ class TransceiverViewModel @Inject constructor(
     /** False (with a notice) when settings ask for encryption but no group key is set. */
     private fun encryptionReady(): Boolean {
         if (settings.value.encryptMessages && keys.key.value == null) {
-            _messages.trySend("Encryption is on but no group key is set. Set one in Settings or turn encryption off.")
+            _messages.trySend(tr("Encryption is on but no group key is set. Set one in Settings or turn encryption off."))
             return false
         }
         return true
@@ -357,7 +358,7 @@ class TransceiverViewModel @Inject constructor(
     }
 
     fun requestCorrections(sessionId: Int) = viewModelScope.launch {
-        if (!client.requestCorrections(sessionId)) _messages.trySend("Nothing to request: the transfer is complete or gone.")
+        if (!client.requestCorrections(sessionId)) _messages.trySend(tr("Nothing to request: the transfer is complete or gone."))
     }
 
     fun cancel(sessionId: Int) = viewModelScope.launch { client.cancel(sessionId) }
@@ -365,7 +366,7 @@ class TransceiverViewModel @Inject constructor(
     /** Plays the pilot tone so the user can hear the output and set the radio's VOX. */
     fun testTone() = viewModelScope.launch {
         if (client.outputStatus()?.muted == true) _messages.trySend(MUTED)
-        if (!client.sendTestTone()) _messages.trySend("Turn the radio on first.")
+        if (!client.sendTestTone()) _messages.trySend(tr("Turn the radio on first."))
     }
 
     private fun warnIfMuted() {
@@ -400,7 +401,7 @@ class TransceiverViewModel @Inject constructor(
             warnIfMuted()
             val c = _compose.value
             if (dispatch(Payload.text(text), settings.value.transferOptions(c.profile, c.to)) == null) {
-                _messages.trySend("Turn the radio on first.")
+                _messages.trySend(tr("Turn the radio on first."))
             }
         }
     }
@@ -428,7 +429,7 @@ class TransceiverViewModel @Inject constructor(
             warnIfMuted()
             val sid = dispatch(Payload.text(c.draft), settings.value.transferOptions(c.profile, c.to))
             if (sid == null) {
-                _messages.trySend("Turn the radio on first.")
+                _messages.trySend(tr("Turn the radio on first."))
                 _compose.update { it.copy(sending = false) }
             } else {
                 _compose.update { it.copy(draft = "", textEstimate = null, sending = false) }
@@ -447,7 +448,7 @@ class TransceiverViewModel @Inject constructor(
         loadJob = viewModelScope.launch {
             val raster = runCatching { codec.load(uri) }.getOrElse {
                 if (it is CancellationException) throw it
-                _compose.update { c -> c.copy(image = c.image?.copy(busy = false, error = "Could not open that image.")) }
+                _compose.update { c -> c.copy(image = c.image?.copy(busy = false, error = tr("Could not open that image."))) }
                 return@launch
             }
             sourceImage = raster
@@ -493,7 +494,7 @@ class TransceiverViewModel @Inject constructor(
             }
         }.onFailure { e ->
             if (e is CancellationException) throw e
-            _compose.update { it.copy(image = it.image?.copy(busy = false, error = "Could not encode the image.")) }
+            _compose.update { it.copy(image = it.image?.copy(busy = false, error = tr("Could not encode the image."))) }
         }
     }
 
@@ -504,11 +505,11 @@ class TransceiverViewModel @Inject constructor(
     /** A file the user picked; the UI reads it from the document picker. */
     fun attachFile(name: String, bytes: ByteArray) {
         if (bytes.isEmpty()) {
-            _messages.trySend("That file is empty.")
+            _messages.trySend(tr("That file is empty."))
             return
         }
         if (bytes.size > Files.MAX_BYTES) {
-            _messages.trySend("Files up to ${Files.MAX_BYTES / 1024} KB can be sent. This one is ${Presenters.formatBytes(bytes.size)}.")
+            _messages.trySend(tr("Files up to %d KB can be sent. This one is %s.", Files.MAX_BYTES / 1024, Presenters.formatBytes(bytes.size)))
             return
         }
         clearImage()
@@ -519,7 +520,7 @@ class TransceiverViewModel @Inject constructor(
     }
 
     fun onFileTooLarge(sizeBytes: Long) {
-        _messages.trySend("Files up to ${Files.MAX_BYTES / 1024} KB can be sent. This one is ${Presenters.formatBytes(sizeBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())}.")
+        _messages.trySend(tr("Files up to %d KB can be sent. This one is %s.", Files.MAX_BYTES / 1024, Presenters.formatBytes(sizeBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())))
     }
 
     /** The whole history as plain text, for sharing or saving. */
@@ -560,7 +561,7 @@ class TransceiverViewModel @Inject constructor(
             warnIfMuted()
             val sid = dispatch(payload, fileOptions(c))
             _compose.update { it.copy(sending = false) }
-            if (sid == null) _messages.trySend("Turn the radio on first.") else clearFile()
+            if (sid == null) _messages.trySend(tr("Turn the radio on first.")) else clearFile()
         }
     }
 
@@ -590,7 +591,7 @@ class TransceiverViewModel @Inject constructor(
             warnIfMuted()
             val sid = dispatch(p.payload, options)
             _compose.update { it.copy(sending = false) }
-            if (sid == null) _messages.trySend("Turn the radio on first.") else clearImage()
+            if (sid == null) _messages.trySend(tr("Turn the radio on first.")) else clearImage()
         }
     }
 
