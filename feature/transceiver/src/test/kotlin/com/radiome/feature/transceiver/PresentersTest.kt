@@ -102,6 +102,27 @@ class PresentersTest {
     }
 
     @Test
+    fun statusCardShowsOneHintAtATime() {
+        val base = RadioUi(running = true, inputLevel = InputLevel.GOOD)
+        assertNull(base.hint)
+        // A quiet input alone is shown by the meter, not by a hint that would flicker with room noise.
+        assertNull(base.copy(inputLevel = InputLevel.LOW).hint)
+        assertTrue(base.copy(inputLevel = InputLevel.HOT).hint!!.contains("clipping"))
+        // Muted output wins over everything, even while transmitting.
+        val muted = base.copy(outputMuted = true, inputLevel = InputLevel.HOT, linkState = com.radiome.core.protocol.link.LinkState.TRANSMITTING)
+        assertTrue(muted.hint!!.contains("muted"))
+        assertNull(base.copy(running = false, outputMuted = true).hint)
+    }
+
+    @Test
+    fun audioFailureMessages() {
+        val tone = Presenters.eventMessage(LinkEvent.AudioOutputFailed(com.radiome.core.protocol.link.LinkController.TEST_TONE_SESSION, "boom"), true)
+        assertTrue(tone!!.startsWith("Test tone failed"))
+        // For a transfer, the Failed event that follows carries the message.
+        assertNull(Presenters.eventMessage(LinkEvent.AudioOutputFailed(7, "boom"), true))
+    }
+
+    @Test
     fun formatting() {
         assertEquals("4.5 s", Presenters.formatDuration(4500).replace(',', '.'))
         assertEquals("2 min 05 s", Presenters.formatDuration(125_000))

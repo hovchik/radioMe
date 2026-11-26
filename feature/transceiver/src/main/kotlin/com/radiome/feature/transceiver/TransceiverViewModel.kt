@@ -2,7 +2,6 @@ package com.radiome.feature.transceiver
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.radiome.core.audio.volumeAdvice
 import com.radiome.core.dsp.modem.ModemProfile
 import com.radiome.core.protocol.image.ImagePipeline
 import com.radiome.core.protocol.image.ImagePreset
@@ -74,9 +73,9 @@ class TransceiverViewModel @Inject constructor(
         }
     }
 
-    private val volume = flow {
+    private val output = flow {
         while (true) {
-            emit(client.outputVolumeFraction()?.let(::volumeAdvice))
+            emit(client.outputStatus())
             delay(TICK_MS)
         }
     }
@@ -85,13 +84,13 @@ class TransceiverViewModel @Inject constructor(
         combine(client.running, client.linkState, client.route, ::Triple),
         client.rx,
         client.transfers,
-        volume,
+        output,
         ticker,
-    ) { (running, state, route), rx, transfers, vol, now ->
+    ) { (running, state, route), rx, transfers, out, now ->
         for (t in transfers.values) if (Presenters.isFinished(t)) finishedSeen.putIfAbsent(t.sessionId, now)
         finishedSeen.keys.retainAll(transfers.keys)
         val hidden = finishedSeen.filterValues { now - it >= Presenters.FINISHED_VISIBLE_MS }.keys
-        Presenters.radio(running, state, route, rx, transfers, vol, hidden)
+        Presenters.radio(running, state, route, rx, transfers, out, hidden)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RadioUi())
 
     val historyItems: StateFlow<List<TransferRecord>> =
@@ -110,6 +109,16 @@ class TransceiverViewModel @Inject constructor(
 
     fun cancel(sessionId: Int) = viewModelScope.launch { client.cancel(sessionId) }
 
+    /** Plays the pilot tone so the user can hear the output and set the radio's VOX. */
+    fun testTone() = viewModelScope.launch {
+        if (client.outputStatus()?.muted == true) _messages.trySend(MUTED)
+        if (!client.sendTestTone()) _messages.trySend("Turn the radio on first.")
+    }
+
+    private fun warnIfMuted() {
+        if (client.outputStatus()?.muted == true) _messages.trySend(MUTED)
+    }
+
     // ------------------------------------------------------------------------------------------ compose
 
     private val _compose = MutableStateFlow(ComposeUi(profile = settings.value.defaultProfile))
@@ -126,7 +135,10 @@ class TransceiverViewModel @Inject constructor(
         _compose.update { it.copy(draft = text, textEstimate = estimate(text, it.profile)) }
     }
 
+    private var profileChosen = false
+
     fun onProfileChange(profile: ModemProfile) {
+        profileChosen = true
         _compose.update { it.copy(profile = profile, textEstimate = estimate(it.draft, profile)) }
         if (sourceImage != null) prepareImage()
     }
@@ -139,6 +151,7 @@ class TransceiverViewModel @Inject constructor(
         if (c.draft.isBlank() || c.sending) return
         viewModelScope.launch {
             _compose.update { it.copy(sending = true) }
+            warnIfMuted()
             val sid = client.send(Payload.text(c.draft), settings.value.transferOptions(c.profile))
             if (sid == null) {
                 _messages.trySend("Turn the radio on first.")
@@ -217,6 +230,7 @@ class TransceiverViewModel @Inject constructor(
         viewModelScope.launch {
             _compose.update { it.copy(sending = true) }
             val options = settings.value.transferOptions(c.profile).copy(compression = CompressionMode.NEVER)
+            warnIfMuted()
             val sid = client.send(p.payload, options)
             _compose.update { it.copy(sending = false) }
             if (sid == null) _messages.trySend("Turn the radio on first.") else clearImage()
@@ -249,12 +263,15 @@ class TransceiverViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            // Only fill in the stored default profile; never overwrite a choice the user made while the settings
+            // file was still loading. (Image presets are read from settings when an image is picked.)
             val s = settingsRepository.load()
-            _compose.update { it.copy(profile = s.defaultProfile, image = it.image?.copy(preset = s.imagePreset())) }
+            if (!profileChosen) _compose.update { it.copy(profile = s.defaultProfile, textEstimate = estimate(it.draft, s.defaultProfile)) }
         }
     }
 
     private companion object {
         const val TICK_MS = 2_000L
+        const val MUTED = "Media volume is muted, so the radio will hear nothing. Turn it up to about 70%."
     }
 }

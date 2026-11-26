@@ -116,6 +116,23 @@ class TransceiverViewModelTest {
     }
 
     @Test
+    fun testToneAndMutedOutputWarnings() = runBlocking {
+        vm.testTone()
+        assertEquals("Turn the radio on first.", withTimeout(2_000) { vm.messages.first() })
+
+        client.startListening()
+        client.muted = true
+        vm.testTone()
+        assertTrue(withTimeout(2_000) { vm.messages.first() }.contains("muted"))
+        waitUntil { client.testTones == 1 }
+
+        vm.onDraftChange("hi")
+        vm.sendText()
+        assertTrue(withTimeout(2_000) { vm.messages.first() }.contains("muted"))
+        waitUntil { client.sent.size == 1 }
+    }
+
+    @Test
     fun linkSettingsChangedWhileOnAskForARestart() {
         vm.updateSettings { it.copy(outputGainPercent = 50) }
         waitUntil { client.live?.second == 0.5f }

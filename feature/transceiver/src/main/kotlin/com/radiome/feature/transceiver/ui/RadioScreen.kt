@@ -38,9 +38,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.radiome.core.audio.RouteMode
-import com.radiome.core.audio.VolumeAdvice
 import com.radiome.core.dsp.modem.ModemProfile
 import com.radiome.core.dsp.modem.RxState
 import com.radiome.core.protocol.image.ImagePreset
@@ -48,7 +48,6 @@ import com.radiome.core.protocol.image.MaxEdge
 import com.radiome.core.protocol.link.LinkState
 import com.radiome.feature.transceiver.ComposeUi
 import com.radiome.feature.transceiver.ImageDraftUi
-import com.radiome.feature.transceiver.InputLevel
 import com.radiome.feature.transceiver.Presenters
 import com.radiome.feature.transceiver.RadioUi
 import kotlin.math.roundToInt
@@ -61,6 +60,7 @@ fun RadioScreen(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onRestart: () -> Unit,
+    onTestTone: () -> Unit,
     onDraftChange: (String) -> Unit,
     onProfileChange: (ModemProfile) -> Unit,
     onSendText: () -> Unit,
@@ -77,7 +77,7 @@ fun RadioScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { StatusCard(radio, restartPending, onStart, onStop, onRestart) }
+        item { StatusCard(radio, restartPending, onStart, onStop, onRestart, onTestTone) }
         items(radio.transfers, key = { it.sessionId * 2 + it.direction.ordinal }) { card ->
             TransferCardView(card, { onRequestCorrections(card.sessionId) }, { onCancel(card.sessionId) })
         }
@@ -91,7 +91,16 @@ fun RadioScreen(
 }
 
 @Composable
-private fun StatusCard(radio: RadioUi, restartPending: Boolean, onStart: () -> Unit, onStop: () -> Unit, onRestart: () -> Unit) {
+private fun StatusCard(
+    radio: RadioUi,
+    restartPending: Boolean,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onRestart: () -> Unit,
+    onTestTone: () -> Unit,
+) {
+    // Every row below is always present and single-line (or fixed at two lines), so live telemetry changes the
+    // text but never the card's height.
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -102,11 +111,13 @@ private fun StatusCard(radio: RadioUi, restartPending: Boolean, onStart: () -> U
                         radio.linkState == LinkState.RECEIVING || radio.rxState != RxState.LISTENING -> "Receiving"
                         else -> "Listening"
                     }
-                    Text(title, style = MaterialTheme.typography.titleLarge)
-                    radio.route?.let {
+                    Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1)
+                    val routeText = radio.route?.let {
                         val mode = if (it.mode == RouteMode.CABLE) "Cable" else "Acoustic"
-                        Text("$mode · in: ${it.input} · out: ${it.output}", style = MaterialTheme.typography.bodySmall)
-                    }
+                        val out = radio.outputDevice ?: it.output
+                        "$mode · in: ${it.input} · out: $out"
+                    } ?: if (radio.running) "Audio route: starting" else "Start listening to receive. Sending also needs the radio on."
+                    OneLine(routeText)
                 }
                 if (radio.running) {
                     OutlinedButton(onClick = onStop) { Text("Stop") }
@@ -118,35 +129,45 @@ private fun StatusCard(radio: RadioUi, restartPending: Boolean, onStart: () -> U
                 LevelMeter(radio.levelDbfs, radio.inputLevel)
                 val level = if (radio.levelDbfs.isInfinite() || radio.levelDbfs.isNaN()) "-" else "%.0f dBFS".format(radio.levelDbfs)
                 val snr = if (radio.snrDb.isNaN()) "-" else "%.1f dB".format(radio.snrDb)
-                Text("Level $level · SNR $snr · sync %.2f".format(radio.syncCorrelation), style = MaterialTheme.typography.bodySmall)
-                when (radio.inputLevel) {
-                    InputLevel.HOT -> Hint("Input is clipping. Turn the radio volume down or move the phone away.")
-                    InputLevel.LOW -> Hint("Input is quiet. Turn the radio volume up or bring the phone closer.")
-                    else -> Unit
-                }
-                if (radio.rxState != RxState.LISTENING) {
-                    LinearProgressIndicator(progress = { radio.burstProgress }, modifier = Modifier.fillMaxWidth())
-                    if (radio.erasedSymbols > 0) Text("Erased symbols: ${radio.erasedSymbols}", style = MaterialTheme.typography.bodySmall)
-                }
-                when (radio.volumeAdvice) {
-                    VolumeAdvice.TOO_LOW -> Hint("Media volume is low. Set it to about 70% so the radio's VOX opens reliably.")
-                    VolumeAdvice.CLIPPING_RISK -> Hint("Media volume is near maximum and may distort. About 70% works best.")
-                    else -> Unit
-                }
-                if (restartPending) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                OneLine("Level $level · SNR $snr · sync %.2f".format(radio.syncCorrelation))
+                val inBurst = radio.rxState != RxState.LISTENING && radio.linkState != LinkState.TRANSMITTING
+                LinearProgressIndicator(
+                    progress = { if (inBurst) radio.burstProgress else 0f },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OneLine(
+                    when {
+                        radio.linkState == LinkState.TRANSMITTING -> "Sending tones" + (radio.outputDevice?.let { " through $it" } ?: "")
+                        inBurst -> "Burst %d%% · erased symbols %d".format((radio.burstProgress * 100).toInt(), radio.erasedSymbols)
+                        else -> "Waiting for a burst"
+                    },
+                )
+                Text(
+                    radio.hint ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    minLines = 2,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (restartPending) {
                         Text("New lead-in or ARQ settings apply after a restart.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                         FilledTonalButton(onClick = onRestart) { Text("Restart") }
+                    } else {
+                        Spacer(Modifier.weight(1f))
                     }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = onTestTone, enabled = radio.linkState != LinkState.TRANSMITTING) { Text("Test tone") }
                 }
-            } else {
-                Text(
-                    "Start listening to receive. Sending also needs the radio on.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
             }
         }
     }
+}
+
+@Composable
+private fun OneLine(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 @Composable
