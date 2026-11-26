@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -67,6 +69,16 @@ class ServiceTransceiverClient(
     override val rx: StateFlow<DemodTelemetry> = fromLink(DemodTelemetry()) { it.rxTelemetry }
     override val transfers: StateFlow<Map<Int, TransferTelemetry>> = fromLink(emptyMap()) { it.transfers }
     override val events: Flow<LinkEvent> = link.flatMapLatest { it?.events ?: emptyFlow() }
+    override val waterfall: Flow<FloatArray> = link.flatMapLatest { l ->
+        if (l == null) emptyFlow() else flow {
+            l.waterfallEnabled = true
+            try {
+                emitAll(l.waterfall)
+            } finally {
+                l.waterfallEnabled = false
+            }
+        }
+    }
     override val route: StateFlow<RouteInfo?> = service
         .flatMapLatest { it?.route ?: flowOf(null) }
         .map { r -> r?.let { RouteInfo(it.mode, it.inputName, it.outputName) } }

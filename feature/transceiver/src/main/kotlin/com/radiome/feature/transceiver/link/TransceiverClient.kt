@@ -10,6 +10,7 @@ import com.radiome.core.protocol.link.TransferTelemetry
 import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.TransferOptions
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Where audio goes right now, for the status bar. */
@@ -24,6 +25,8 @@ interface TransceiverClient {
     val transfers: StateFlow<Map<Int, TransferTelemetry>>
     val events: Flow<LinkEvent>
     val route: StateFlow<RouteInfo?>
+    /** Input spectrum rows for the waterfall; computed only while someone collects this. */
+    val waterfall: Flow<FloatArray> get() = emptyFlow()
 
     /** Starts the foreground service. Call while the UI is visible and RECORD_AUDIO is granted. */
     fun startListening()

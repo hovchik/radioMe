@@ -7,6 +7,7 @@ import com.radiome.core.dsp.framing.FrameCodec
 import com.radiome.core.dsp.framing.NackCodec
 import com.radiome.core.dsp.modem.DemodTelemetry
 import com.radiome.core.dsp.modem.MfskModemEngine
+import com.radiome.core.dsp.math.Spectrogram
 import com.radiome.core.dsp.modem.ModemConfig
 import com.radiome.core.dsp.modem.PhyBurst
 import com.radiome.core.dsp.modem.RawBurst
@@ -34,6 +35,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -88,6 +90,13 @@ class LinkController(
 
     private val _rx = MutableStateFlow(DemodTelemetry())
     val rxTelemetry: StateFlow<DemodTelemetry> = _rx.asStateFlow()
+
+    /** Set while a waterfall is on screen; the spectrum costs an FFT ten times a second, so it is off otherwise. */
+    @Volatile var waterfallEnabled: Boolean = false
+    private val spectrogram = Spectrogram(ModemConfig.SAMPLE_RATE)
+    private val _waterfall = MutableSharedFlow<FloatArray>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    /** Spectrum rows of the input ([Spectrogram]: 300-2700 Hz, dB), about ten per second while enabled. */
+    val waterfall: SharedFlow<FloatArray> = _waterfall.asSharedFlow()
 
     private val _transfers = MutableStateFlow<Map<Int, TransferTelemetry>>(emptyMap())
     val transfers: StateFlow<Map<Int, TransferTelemetry>> = _transfers.asStateFlow()
@@ -309,6 +318,7 @@ class LinkController(
     private fun onInput(block: FloatArray) {
         clock += block.size
         if (transmitting) return // half-duplex guard: never decode our own transmission
+        if (waterfallEnabled) for (row in spectrogram.process(block)) _waterfall.tryEmit(row)
         if (resetDemod) {
             demod.reset()
             resetDemod = false

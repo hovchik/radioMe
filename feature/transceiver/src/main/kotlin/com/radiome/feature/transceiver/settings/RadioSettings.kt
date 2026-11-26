@@ -49,6 +49,12 @@ data class RadioSettings(
     val adaptiveSpeed: Boolean = false,
     /** Messages to all stations collect every receiver's corrections and confirmations (broadcast mode). */
     val groupMode: Boolean = true,
+    /** Live spectrum of the input on the radio screen. */
+    val showWaterfall: Boolean = true,
+    /** Bigger text everywhere, on top of the system font size. */
+    val largeText: Boolean = false,
+    /** Vibrate when a message arrives or is delivered. */
+    val haptics: Boolean = true,
 ) {
     fun sanitized(): RadioSettings = copy(
         leadInMs = leadInMs.coerceIn(ModemConfig.MIN_LEAD_IN_MS, ModemConfig.MAX_LEAD_IN_MS),

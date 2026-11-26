@@ -96,6 +96,17 @@ fun SettingsScreen(
             "Smaller chunks waste less when one is lost; larger ones have less overhead.",
         ) { v -> onChange { it.copy(chunkPayloadSize = v) } }
 
+        Section("Display and feedback")
+        Toggle("Waterfall", settings.showWaterfall, "Live spectrum of what the phone hears, on the Radio tab.") { v ->
+            onChange { it.copy(showWaterfall = v) }
+        }
+        Toggle("Larger text", settings.largeText, "Makes all text bigger, on top of the system font size.") { v ->
+            onChange { it.copy(largeText = v) }
+        }
+        Toggle("Vibrate on messages", settings.haptics, "A short buzz when a message arrives or is confirmed.") { v ->
+            onChange { it.copy(haptics = v) }
+        }
+
         Section("Corrections (ARQ)")
         Toggle("Request missing chunks automatically", settings.autoNack,
             "Off: the dashboard shows a Send correction request button instead.") { v -> onChange { it.copy(autoNack = v) } }

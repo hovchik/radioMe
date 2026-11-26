@@ -52,6 +52,7 @@ import com.radiome.core.protocol.link.LinkState
 import com.radiome.feature.transceiver.ComposeUi
 import com.radiome.feature.transceiver.HeardStation
 import com.radiome.feature.transceiver.FileDraftUi
+import kotlinx.coroutines.flow.Flow
 import com.radiome.feature.transceiver.ImageDraftUi
 import com.radiome.feature.transceiver.LinkTestUi
 import com.radiome.feature.transceiver.QueuedItem
@@ -88,6 +89,8 @@ fun RadioScreen(
     queue: List<QueuedItem>,
     queueActions: QueueActions,
     fileActions: FileActions,
+    /** Spectrum rows, or null when the waterfall is turned off. */
+    waterfall: Flow<FloatArray>?,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -96,6 +99,7 @@ fun RadioScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { StatusCard(radio, restartPending, onStart, onStop, onRestart, onTestTone, onLinkTest, linkTest.running) }
+        if (radio.running && waterfall != null) item { WaterfallCard(waterfall) }
         if (linkTest.visible) item { LinkTestCard(linkTest, onApplyLinkTest, onDismissLinkTest) }
         items(radio.transfers, key = { it.sessionId * 2 + it.direction.ordinal }) { card ->
             TransferCardView(card, { onRequestCorrections(card.sessionId) }, { onCancel(card.sessionId) })

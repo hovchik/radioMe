@@ -253,6 +253,8 @@ class TransceiverViewModel @Inject constructor(
     }
 
     private fun onLinkEvent(e: LinkEvent) {
+        val noteworthy = (e is LinkEvent.MessageReceived && e.payload.type != ContentType.POSITION) || e is LinkEvent.Delivered
+        if (noteworthy && settings.value.haptics) _buzz.trySend(Unit)
         when (e) {
             is LinkEvent.NackReceived -> tracked[e.sessionId]?.let { t ->
                 if (t.firstLoss == null) {
@@ -519,6 +521,13 @@ class TransceiverViewModel @Inject constructor(
 
     /** The whole history as plain text, for sharing or saving. */
     fun historyText(): String = HistoryExport.text(historyItems.value)
+
+    /** Input spectrum for the waterfall; the link computes it only while this is collected. */
+    val waterfall: Flow<FloatArray> get() = client.waterfall
+
+    private val _buzz = Channel<Unit>(Channel.CONFLATED)
+    /** A short vibration is due: a message arrived or was confirmed (when haptics are on). */
+    val buzz: Flow<Unit> = _buzz.receiveAsFlow()
 
     fun notify(message: String) {
         _messages.trySend(message)

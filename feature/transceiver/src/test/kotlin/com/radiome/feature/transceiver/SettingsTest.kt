@@ -72,6 +72,7 @@ class SettingsTest {
             it.copy(
                 leadInMs = 950, parityPercent = 40, defaultProfile = ModemProfile.ROBUST, imageMaxEdge = MaxEdge.PX_128, autoNack = false,
                 callsign = "ek1a/p", quickMessages = listOf("Copy", " ", "At the hut"), imageProgressive = false,
+                showWaterfall = false, largeText = true, haptics = false,
             )
         }
         assertEquals("EK1A/P", saved.callsign)
