@@ -143,6 +143,8 @@ class LinkController(
         for (job in txQueue) {
             if (senders[job.sessionId]?.phase == SenderPhase.CANCELLED) continue
             _state.first { it == LinkState.LISTENING }
+            // cancel() may have been called while we waited for the channel.
+            if (senders[job.sessionId]?.phase == SenderPhase.CANCELLED) continue
             transmitting = true
             currentTxSession = job.sessionId
             _state.value = LinkState.TRANSMITTING

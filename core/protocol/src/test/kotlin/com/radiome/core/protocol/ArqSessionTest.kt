@@ -103,3 +103,15 @@ class ArqSessionTest {
     private fun rawOf(b: com.radiome.core.dsp.modem.PhyBurst) =
         com.radiome.core.dsp.modem.RawBurst(b.header, b.body, BooleanArray(b.body.size), 30.0, 0, 0, 0)
 }
+
+class ControlBurstTest {
+    @Test
+    fun `worst-case nack fits in a single burst`() {
+        val rs = ReceiverSession(1)
+        // Total of 65534 chunks with every other one missing: the largest correction request a session can produce.
+        rs.onFrame(com.radiome.core.dsp.framing.Frame(FrameType.DATA, 1, 1, 65534, ByteArray(1)), CodewordStatus.OK, 0)
+        val frames = rs.nackFrames()
+        val bursts = com.radiome.core.protocol.session.Packetizer.bursts(frames, com.radiome.core.protocol.arq.controlOptions(ArqConfig()))
+        assertEquals(1, bursts.size, "${frames.size} NACK frames")
+    }
+}

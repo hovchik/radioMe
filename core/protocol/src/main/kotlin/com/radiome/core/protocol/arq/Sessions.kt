@@ -16,7 +16,12 @@ import com.radiome.core.protocol.session.ReceiverSnapshot
 import com.radiome.core.protocol.session.TransferOptions
 
 /** Options for NACK / ACK / poll bursts. */
-internal fun controlOptions(arq: ArqConfig) = TransferOptions(profile = arq.controlProfile, chunkPayloadSize = FrameCodec.DEFAULT_PAYLOAD)
+/**
+ * Options for NACK / ACK / poll bursts. A whole correction request always fits one burst
+ * (255 frames x 360 chunks per bitmap frame > 65535 chunks), so the sender never acts on half a NACK.
+ */
+internal fun controlOptions(arq: ArqConfig) =
+    TransferOptions(profile = arq.controlProfile, chunkPayloadSize = FrameCodec.DEFAULT_PAYLOAD, maxFramesPerBurst = 255)
 
 // ------------------------------------------------------------------------------------------------ receiver
 
