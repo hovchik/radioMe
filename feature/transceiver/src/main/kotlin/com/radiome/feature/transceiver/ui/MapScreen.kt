@@ -89,7 +89,7 @@ import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.CopyrightOverlay
-import org.osmdroid.views.overlay.FolderOverlay
+import org.osmdroid.views.overlay.Overlay
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
@@ -206,6 +206,9 @@ fun MapScreen(
             AndroidView(
                 factory = { ctx ->
                     MapView(ctx).apply {
+                        // Compose can detach and re-attach the view (tab changes, layout passes); by default osmdroid
+                        // tears the map down on detach, leaving overlays unusable. We detach it ourselves on dispose.
+                        setDestroyMode(false)
                         setTileSource(TileSourceFactory.MAPNIK)
                         setUseDataConnection(onlineTiles)
                         setMultiTouchControls(true)
@@ -219,8 +222,6 @@ fun MapScreen(
 
                             override fun longPressHelper(p: GeoPoint?): Boolean = false
                         }))
-                        overlays.add(layers.trails)
-                        overlays.add(layers.markers)
                         overlays.add(ScaleBarOverlay(this).apply {
                             setCentred(true)
                             setAlignBottom(true)
@@ -745,8 +746,8 @@ private fun stationColor(p: StationPosition, now: Long): Int = when {
  * something visible changes: the ticking clock alone redraws nothing until a fix crosses a freshness step.
  */
 private class StationLayers {
-    val trails = FolderOverlay()
-    val markers = FolderOverlay()
+    /** Our trail and marker overlays currently on the map, kept directly in its overlay list. */
+    private val shown = ArrayList<Overlay>()
     private var lastSignature: Any? = null
     private val icons = HashMap<String, StationIcon>()
 
@@ -763,8 +764,10 @@ private class StationLayers {
         if (signature == lastSignature) return
         lastSignature = signature
 
-        trails.items.clear()
-        markers.items.clear()
+        view.overlays.removeAll(shown.toSet())
+        shown.clear()
+        val trails = ArrayList<Overlay>()
+        val markers = ArrayList<Overlay>()
         val density = view.resources.displayMetrics.density
         val colorByKey = positions.zip(colors).associate { (p, c) -> MapGeo.key(p) to c }
         for ((key, points) in trailPoints) {
@@ -796,6 +799,11 @@ private class StationLayers {
                 }
             })
         }
+        // Just above the tap catcher, so the scale bar, copyright and GPS dot stay on top.
+        val at = view.overlays.indexOfFirst { it is MapEventsOverlay } + 1
+        view.overlays.addAll(at, trails + markers)
+        shown += trails
+        shown += markers
         if (icons.size > 200) icons.clear()
         view.invalidate()
     }
