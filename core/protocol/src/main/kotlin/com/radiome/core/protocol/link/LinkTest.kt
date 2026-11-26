@@ -160,6 +160,8 @@ internal class ProbeCollector {
         a.snr = snrDb
     }
 
+    fun has(profile: ModemProfile): Boolean = profile in acc
+
     fun report(): LinkTestReport = LinkTestReport(
         LinkTest.order.map { p ->
             val a = acc[p]

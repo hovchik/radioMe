@@ -3,6 +3,7 @@ package com.radiome.core.protocol.link
 import com.radiome.core.dsp.framing.BurstCodec
 import com.radiome.core.dsp.framing.Frame
 import com.radiome.core.dsp.framing.FrameType
+import com.radiome.core.dsp.framing.FrameCodec
 import com.radiome.core.dsp.framing.NackCodec
 import com.radiome.core.dsp.modem.DemodTelemetry
 import com.radiome.core.dsp.modem.MfskModemEngine
@@ -22,6 +23,7 @@ import com.radiome.core.protocol.payload.ContentType
 import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.ChunkState
 import com.radiome.core.protocol.session.ChunkTracker
+import com.radiome.core.protocol.session.AirtimeEstimator
 import com.radiome.core.protocol.session.Packetizer
 import com.radiome.core.protocol.session.TransferOptions
 import kotlinx.coroutines.CancellationException
@@ -85,7 +87,13 @@ class LinkController(
     val events: SharedFlow<LinkEvent> = _events.asSharedFlow()
 
     /** Either modem [bursts] or, for a test tone, [raw] samples. */
-    private class TxJob(val sessionId: Int, val bursts: List<PhyBurst>, val onDone: () -> Unit, val raw: FloatArray? = null)
+    private class TxJob(
+        val sessionId: Int,
+        val bursts: List<PhyBurst>,
+        val onDone: () -> Unit,
+        val raw: FloatArray? = null,
+        val onFailed: () -> Unit = {},
+    )
 
     private val txQueue = Channel<TxJob>(Channel.UNLIMITED)
     private var transmitting = false
@@ -111,6 +119,25 @@ class LinkController(
     /** Link tests heard from another station, answered after the turnaround. */
     private val probes = LinkedHashMap<Int, ProbeCollector>()
     private val pendingProbes = LinkedHashSet<Int>()
+    /** Incoming sessions whose first burst slot decoded at least once, so their addressee is known. */
+    private val identified = HashSet<Int>()
+    /** Complete sessions held back until a burst tells us whom they are for. */
+    private val withheld = HashSet<Int>()
+    /** Sample clock at the first probe of each link test we are measuring. */
+    private val probeStart = HashMap<Int, Long>()
+    /** Air time of a whole probe sequence (all profiles, with STATION frames), for the answer deadline. */
+    private val probeSequenceMs: Long by lazy {
+        val est = AirtimeEstimator(engine)
+        LinkTest.order.sumOf { p ->
+            est.framesMs(
+                LinkTest.probeCount(p),
+                TransferOptions(
+                    profile = p, chunkPayloadSize = LinkTest.PAYLOAD, parityRatio = LinkTest.PROBE_PARITY,
+                    maxFramesPerBurst = 255, station = StationInfo("X"),
+                ),
+            )
+        }
+    }
 
     fun start(): Job = scope.launch {
         launch { txLoop() }
@@ -151,8 +178,11 @@ class LinkController(
             )
             Packetizer.bursts(LinkTest.probeFrames(sid, p), opts)
         }
-        enqueue(sid, bursts) { testWait[sid] = 0 }
         emit(LinkEvent.LinkTestStarted(sid))
+        enqueue(sid, bursts, onFailed = {
+            ownTests.remove(sid)
+            emit(LinkEvent.LinkTestFailed(sid, "the probes could not be played"))
+        }) { testWait[sid] = 0 }
         return sid
     }
 
@@ -202,8 +232,8 @@ class LinkController(
         txQueue.trySend(TxJob(TEST_TONE_SESSION, emptyList(), {}, raw = tone))
     }
 
-    private fun enqueue(sessionId: Int, bursts: List<PhyBurst>, onDone: () -> Unit) {
-        txQueue.trySend(TxJob(sessionId, bursts, onDone))
+    private fun enqueue(sessionId: Int, bursts: List<PhyBurst>, onFailed: () -> Unit = {}, onDone: () -> Unit) {
+        txQueue.trySend(TxJob(sessionId, bursts, onDone, onFailed = onFailed))
     }
 
     private suspend fun txLoop() {
@@ -244,6 +274,7 @@ class LinkController(
                 if (sender != null) awaiting.remove(job.sessionId)
                 emit(LinkEvent.AudioOutputFailed(job.sessionId, reason, transferFailed = aborted))
                 if (aborted) emit(LinkEvent.Failed(job.sessionId, reason))
+                job.onFailed()
             } else {
                 job.onDone()
             }
@@ -282,6 +313,9 @@ class LinkController(
             stations[f.sessionId] = info
             if (info.source.isNotEmpty()) emit(LinkEvent.StationHeard(f.sessionId, info.source, raw.snrDb))
         }
+        // The first slot carries the STATION frame when the sender identifies itself. Once a first slot decodes, we
+        // know who the session is for (or that the sender sends no STATION frames).
+        results.firstOrNull()?.frame?.let { identified += it.sessionId }
         val nacks = LinkedHashMap<Int, MutableList<Int>>()
         val acks = LinkedHashMap<Int, String?>()
         for (r in results) {
@@ -310,6 +344,7 @@ class LinkController(
                 FrameType.ACK -> if (forUs) acks[f.sessionId] = station?.source?.ifEmpty { null }
                 FrameType.PROBE -> {
                     if (f.sessionId in ownTests || !forUs) continue
+                    probeStart.getOrPut(f.sessionId) { clock }
                     probes.getOrPut(f.sessionId) { ProbeCollector() }.add(raw.header.profile, f, r.status, r.correctedBytes, raw.snrDb)
                     if (station != null) peers[f.sessionId] = station
                     pendingProbes += f.sessionId
@@ -388,9 +423,15 @@ class LinkController(
             publish()
         }
         if (pendingProbes.isNotEmpty() && quietMs >= arq.turnaroundMs) {
-            val ids = pendingProbes.toList()
-            pendingProbes.clear()
-            ids.forEach(::answerLinkTest)
+            // Answer once the whole probe sequence is over: the last profile was heard, or there has been time for
+            // all of it. A burst lost to a fade leaves a quiet gap while the tester is still transmitting.
+            val ready = pendingProbes.filter { sid ->
+                val heardLast = probes[sid]?.has(LinkTest.order.last()) == true
+                val elapsedMs = (clock - (probeStart[sid] ?: clock)) * 1000 / fs
+                heardLast || elapsedMs >= probeSequenceMs + arq.turnaroundMs
+            }
+            pendingProbes.removeAll(ready.toSet())
+            ready.forEach(::answerLinkTest)
         }
         val limit = arq.responseTimeoutMs.toLong() * fs / 1000
         if (testWait.isNotEmpty()) {
@@ -418,6 +459,7 @@ class LinkController(
     }
 
     private fun answerLinkTest(sid: Int) {
+        probeStart.remove(sid)
         val report = probes.remove(sid)?.report() ?: return
         val peer = peers[sid]?.source?.ifEmpty { null }
         emit(LinkEvent.LinkTestReported(sid, report, peer, measuredHere = true))
@@ -430,7 +472,18 @@ class LinkController(
         when (val a = rs.onOverEnded()) {
             is ReceiverAction.Completed -> {
                 store.save(rs.snapshot())
-                if (a.firstTime) emit(LinkEvent.MessageReceived(sid, a.payload, peer?.source?.ifEmpty { null }, peer?.destination))
+                if (peer == null && sid !in identified) {
+                    // Every first slot was lost, so the STATION frame may have said this is for someone else. Ask
+                    // for the header again: the sender repeats it in a burst that starts with its STATION frame.
+                    withheld += sid
+                    val ask = NackCodec.encode(listOf(Packetizer.HEADER_CHUNK), FrameCodec.DEFAULT_PAYLOAD)
+                        .map { Frame(FrameType.NACK, sid, 0, rs.tracker.totalChunks ?: 0, it) }
+                    enqueue(sid, controlBursts(ask, null)) {}
+                    emit(LinkEvent.NackSent(sid, listOf(Packetizer.HEADER_CHUNK)))
+                    return
+                }
+                val firstTime = a.firstTime || withheld.remove(sid)
+                if (firstTime) emit(LinkEvent.MessageReceived(sid, a.payload, peer?.source?.ifEmpty { null }, peer?.destination))
                 if (arq.sendAck) {
                     enqueue(sid, controlBursts(listOf(rs.ackFrame()), peer?.source)) {}
                     emit(LinkEvent.AckSent(sid))
