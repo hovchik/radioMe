@@ -60,6 +60,8 @@ data class TransferTelemetry(
     val ackedBy: List<String> = emptyList(),
     /** What can be shown so far of an incoming progressive image. */
     val preview: ImagePreview? = null,
+    /** Incoming: the sender's STATION frame addressed it to every station. */
+    val broadcast: Boolean = false,
 )
 
 sealed interface LinkEvent {

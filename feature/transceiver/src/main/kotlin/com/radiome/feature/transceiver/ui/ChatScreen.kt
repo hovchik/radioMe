@@ -276,8 +276,10 @@ private fun Conversation(
 ) {
     val list = rememberLazyListState()
     // Keep the newest message in view and mark it read while the conversation is open.
+    // Completing a transfer updates its row in place, so watch the newest update time as well as the count.
+    val newest = messages.maxOfOrNull { it.updatedAt } ?: 0L
+    LaunchedEffect(newest) { actions.onRead(peer) }
     LaunchedEffect(messages.size, waiting.size) {
-        actions.onRead(peer)
         val count = messages.size + waiting.size
         if (count > 0) list.animateScrollToItem(count - 1)
     }

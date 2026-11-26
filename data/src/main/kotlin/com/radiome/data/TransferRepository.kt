@@ -144,6 +144,8 @@ class TransferRepository(
     fun applyTelemetry(t: TransferTelemetry) = updateLatest(t.sessionId, t.direction) {
         it.copy(
             peer = if (t.direction == Direction.INCOMING) t.peer ?: it.peer else it.peer,
+            // Known from the sender's STATION frame, so a broadcast shows in "All stations" while it still arrives.
+            broadcast = if (t.direction == Direction.INCOMING && t.peer != null) t.broadcast else it.broadcast,
             totalChunks = if (t.totalChunks > 0) t.totalChunks else it.totalChunks,
             receivedChunks = if (t.direction == Direction.INCOMING) t.receivedChunks else it.receivedChunks,
             fecCorrectedBytes = t.fecCorrectedBytes,
