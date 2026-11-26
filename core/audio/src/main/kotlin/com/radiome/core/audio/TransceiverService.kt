@@ -142,18 +142,33 @@ class TransceiverService : Service() {
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                UsbManager.ACTION_USB_DEVICE_DETACHED -> serialPtt?.close()
-                UsbSerialPtt.ACTION_PERMISSION -> Unit
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    serialPtt?.close()
+                    _pttDevice.value = null
+                }
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                    // A newly plugged adapter: ask again even if access to an earlier one was refused.
+                    usbAccessDenied = false
+                    refreshPtt()
+                }
+                UsbSerialPtt.ACTION_PERMISSION -> {
+                    if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
+                        refreshPtt()
+                    } else {
+                        // Refused: stay on the VOX fallback and do not pop the dialog again until the next plug-in.
+                        usbAccessDenied = true
+                    }
+                }
             }
-            refreshPtt()
         }
     }
     private var usbReceiverRegistered = false
+    private var usbAccessDenied = false
 
     /** Look for the PTT adapter again (after plugging it in, or once access was granted). */
     fun refreshPtt() {
         val keyer = serialPtt ?: return
-        keyer.refresh()
+        keyer.refresh(askPermission = !usbAccessDenied)
         _pttDevice.value = keyer.deviceName
     }
 
@@ -161,6 +176,7 @@ class TransceiverService : Service() {
         if (usbReceiverRegistered) return
         val filter = IntentFilter().apply {
             addAction(UsbSerialPtt.ACTION_PERMISSION)
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -228,8 +244,8 @@ class TransceiverService : Service() {
                 audio.ptt = keyer
                 serialPtt = keyer
                 registerUsbReceiver()
-                keyer.refresh()
-                _pttDevice.value = keyer.deviceName
+                usbAccessDenied = false // starting the radio is an explicit retry
+                refreshPtt()
             }
             else -> Unit
         }

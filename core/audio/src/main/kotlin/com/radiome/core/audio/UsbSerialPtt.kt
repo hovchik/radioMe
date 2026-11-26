@@ -27,12 +27,16 @@ class UsbSerialPtt(context: Context, private val useRts: Boolean) : PttKeyer {
 
     override val ready: Boolean get() = connection != null
 
-    /** Finds and opens the adapter; call when starting the radio and when a device is attached. */
+    /**
+     * Finds and opens the adapter; call when starting the radio and when a device is attached. Without access it asks
+     * for it when [askPermission] is set (the answer comes back as [ACTION_PERMISSION]).
+     */
     @Synchronized
-    fun refresh(): Boolean {
+    fun refresh(askPermission: Boolean = true): Boolean {
         if (connection != null) return true
         val (device, found) = usb.deviceList.values.firstNotNullOfOrNull { d -> chipOf(d)?.let { d to it } } ?: return false
         if (!usb.hasPermission(device)) {
+            if (!askPermission) return false
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
             val intent = Intent(ACTION_PERMISSION).setPackage(appContext.packageName)
             usb.requestPermission(device, PendingIntent.getBroadcast(appContext, 0, intent, flags))
