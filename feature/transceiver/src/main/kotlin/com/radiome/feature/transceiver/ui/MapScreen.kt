@@ -1,8 +1,6 @@
 package com.radiome.feature.transceiver.ui
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -44,6 +42,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -68,16 +67,19 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.radiome.data.StationPosition
 import com.radiome.feature.transceiver.Presenters
 import com.radiome.feature.transceiver.i18n.tr
+import com.radiome.feature.transceiver.map.AreaDownloader
 import com.radiome.feature.transceiver.map.MapGeo
+import com.radiome.feature.transceiver.map.MapLocation
 import com.radiome.feature.transceiver.map.MapGeo.latLon
 import com.radiome.feature.transceiver.map.OfflineMaps
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
@@ -127,7 +129,19 @@ fun MapScreen(
     var onlineTiles by remember { mutableStateOf(OfflineMaps.onlineTiles(context)) }
     var showOfflineDialog by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
-    var locationAllowed by remember { mutableStateOf(hasLocationPermission(context)) }
+    var locationAllowed by remember { mutableStateOf(MapLocation.granted(context)) }
+    var preciseLocation by remember { mutableStateOf(MapLocation.precise(context)) }
+    var locationServicesOn by remember { mutableStateOf(MapLocation.servicesOn(context)) }
+    // The user may change any of these in Android's settings and come back.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        locationAllowed = MapLocation.granted(context)
+        preciseLocation = MapLocation.precise(context)
+        locationServicesOn = MapLocation.servicesOn(context)
+    }
+    val scope = rememberCoroutineScope()
+    var saving by remember { mutableStateOf<AreaDownloader.Progress?>(null) }
+    var saveJob by remember { mutableStateOf<Job?>(null) }
+    var saveResult by remember { mutableStateOf<String?>(null) }
     var liveFix by remember { mutableStateOf<MapGeo.LatLon?>(null) }
     var myLocation by remember { mutableStateOf<LiveLocationOverlay?>(null) }
     var followRequested by remember { mutableStateOf(false) }
@@ -137,21 +151,53 @@ fun MapScreen(
     val onSelect: (String?) -> Unit = { selected = it }
 
     val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
-        if (granted.values.any { it }) {
-            locationAllowed = true
-            followRequested = true
-        }
+        locationAllowed = MapLocation.granted(context)
+        preciseLocation = MapLocation.precise(context)
+        locationServicesOn = MapLocation.servicesOn(context)
+        if (granted.values.any { it }) followRequested = true
+    }
+    val askLocation = {
+        PermissionPrompts.markAsked(context, MapLocation.PERMISSIONS.toList())
+        locationLauncher.launch(MapLocation.PERMISSIONS)
     }
     val centerOnMe = {
-        if (!locationAllowed) {
-            locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-        } else {
-            followRequested = true
+        when {
+            !locationAllowed -> askLocation()
+            !locationServicesOn -> MapLocation.openLocationSettings(context)
+            else -> { followRequested = true }
+        }
+    }
+    val saveArea: () -> Unit = save@{
+        val view = map ?: return@save
+        val box = view.boundingBox
+        val plan = MapGeo.planSave(box.latNorth, box.latSouth, box.lonEast, box.lonWest, view.zoomLevelDouble) ?: return@save
+        saveResult = null
+        saveJob = scope.launch {
+            try {
+                val done = AreaDownloader.save(plan) { p -> view.post { saving = p } }
+                saveResult = if (done.failed == 0) {
+                    tr("Area saved: %d new tiles. It now works offline.", done.saved)
+                } else {
+                    tr("Saved %d tiles, %d failed. Check the internet connection and save again.", done.saved, done.failed)
+                }
+            } finally {
+                saving = null
+                saveJob = null
+                view.tileProvider.clearTileCache()
+                view.invalidate()
+            }
         }
     }
 
     Column(modifier.fillMaxSize()) {
         KeyBanner(hasKey, fingerprint)
+        LocationBanner(
+            allowed = locationAllowed,
+            precise = preciseLocation,
+            servicesOn = locationServicesOn,
+            onAllow = askLocation,
+            onTurnOn = { MapLocation.openLocationSettings(context) },
+        )
 
         Box(Modifier.fillMaxWidth().weight(1f)) {
             AndroidView(
@@ -182,7 +228,9 @@ fun MapScreen(
                     }
                 },
                 update = { view ->
-                    layers.render(view, positions, if (showTrails) trails else emptyMap(), now, selected, onSelect)
+                    // With a live fix the GPS dot is "you"; the last position you sent would be a second, older you.
+                    val shown = if (liveFix != null) positions.filterNot { it.own } else positions
+                    layers.render(view, shown, if (showTrails) trails else emptyMap(), now, selected, onSelect)
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -202,6 +250,20 @@ fun MapScreen(
                     OfflineMaps.setShowTrails(context, showTrails)
                 }
                 MapControl(tr("Offline maps"), active = !onlineTiles) { showOfflineDialog = true }
+            }
+
+            saving?.let { p ->
+                Surface(
+                    Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 36.dp),
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    tonalElevation = 2.dp,
+                ) {
+                    Row(Modifier.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(tr("Saving map %d/%d", p.done, p.total), style = MaterialTheme.typography.labelMedium)
+                        TextButton(onClick = { saveJob?.cancel() }) { Text(tr("Cancel")) }
+                    }
+                }
             }
 
             if (!onlineTiles) {
@@ -267,6 +329,13 @@ fun MapScreen(
                 map?.setUseDataConnection(it)
             },
             onFilesChanged = { map?.let { reloadTiles(it, onlineTiles) } },
+            savePlan = remember(showOfflineDialog) {
+                map?.let { MapGeo.planSave(it.boundingBox.latNorth, it.boundingBox.latSouth, it.boundingBox.lonEast, it.boundingBox.lonWest, it.zoomLevelDouble) }
+            },
+            saving = saving,
+            saveResult = saveResult,
+            onSave = saveArea,
+            onCancelSave = { saveJob?.cancel() },
             onDismiss = { showOfflineDialog = false },
         )
     }
@@ -386,6 +455,26 @@ private fun KeyBanner(hasKey: Boolean, fingerprint: String?) {
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+        }
+    }
+}
+
+/** Why you are missing from the map, with the one tap that fixes it. Nothing shows when location works. */
+@Composable
+private fun LocationBanner(allowed: Boolean, precise: Boolean, servicesOn: Boolean, onAllow: () -> Unit, onTurnOn: () -> Unit) {
+    val (text, button, action) = when {
+        !allowed -> Triple(tr("Allow location to see yourself on the map."), tr("Allow"), onAllow)
+        !servicesOn -> Triple(tr("Location is off on this phone, so the map can't find you."), tr("Turn on"), onTurnOn)
+        !precise -> Triple(tr("Approximate location only: you can show up to 3 km off."), tr("Use precise"), onAllow)
+        else -> return
+    }
+    Card(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+    ) {
+        Row(Modifier.padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            TextButton(onClick = action) { Text(button) }
         }
     }
 }
@@ -522,6 +611,11 @@ private fun OfflineMapsDialog(
     onlineTiles: Boolean,
     onOnlineChange: (Boolean) -> Unit,
     onFilesChanged: () -> Unit,
+    savePlan: List<MapGeo.TileRange>?,
+    saving: AreaDownloader.Progress?,
+    saveResult: String?,
+    onSave: () -> Unit,
+    onCancelSave: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -566,6 +660,30 @@ private fun OfflineMapsDialog(
                     }
                     Switch(checked = onlineTiles, onCheckedChange = onOnlineChange)
                 }
+                HorizontalDivider()
+                Text(tr("Save the area on screen"), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    when {
+                        !onlineTiles -> tr("Turn on map downloads to save an area.")
+                        savePlan == null -> tr("This area is too big to save at once. Zoom in, then save it in parts.")
+                        else -> tr(
+                            "About %d tiles, zoom %d to %d. OpenStreetMap allows up to 250 tiles per save: zoom in for street detail, out for a wider area.",
+                            savePlan.sumOf { it.count }, savePlan.first().z, savePlan.last().z,
+                        )
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (saving != null) {
+                    Text(tr("Saving %d of %d…", saving.done, saving.total), style = MaterialTheme.typography.bodySmall)
+                    LinearProgressIndicator(
+                        progress = { if (saving.total == 0) 0f else saving.done.toFloat() / saving.total },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    TextButton(onClick = onCancelSave) { Text(tr("Cancel")) }
+                } else {
+                    FilledTonalButton(onClick = onSave, enabled = onlineTiles && savePlan != null) { Text(tr("Save this area")) }
+                }
+                saveResult?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 HorizontalDivider()
                 if (files.isEmpty()) {
                     Text(tr("No map files imported."), style = MaterialTheme.typography.bodySmall)
@@ -756,10 +874,6 @@ private object MapCamera {
         center?.let { view.controller.setCenter(it) }
     }
 }
-
-private fun hasLocationPermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
 private fun fit(view: MapView, positions: List<StationPosition>) {
     if (positions.isEmpty()) return

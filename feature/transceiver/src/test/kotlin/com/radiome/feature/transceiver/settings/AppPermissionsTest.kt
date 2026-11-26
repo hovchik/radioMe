@@ -39,4 +39,26 @@ class AppPermissionsTest {
         assertEquals(PermissionStatus.DENIED, off.status)
         assertEquals(PermissionAction.OPEN_SETTINGS, off.action)
     }
+
+    @Test
+    fun approximateLocationOffersPrecise() {
+        val none = row(permissionRows(34, true, true, emptySet(), emptySet()), AppPermission.LOCATION)
+        assertEquals(PermissionStatus.DENIED, none.status)
+        assertEquals(PermissionAction.REQUEST, none.action)
+        val approx = row(
+            permissionRows(34, true, true, setOf(AppPermission.LOCATION), setOf(AppPermission.LOCATION), locationGranted = true, preciseLocation = false),
+            AppPermission.LOCATION,
+        )
+        assertEquals(PermissionAction.REQUEST, approx.action)
+        val precise = row(permissionRows(34, true, true, emptySet(), emptySet(), locationGranted = true, preciseLocation = true), AppPermission.LOCATION)
+        assertEquals(PermissionAction.REVOKE, precise.action)
+    }
+
+    @Test
+    fun locationSwitchOffPointsToSettings() {
+        val off = row(permissionRows(34, true, true, emptySet(), emptySet(), locationServicesOn = false), AppPermission.LOCATION_SERVICES)
+        assertEquals(PermissionStatus.DENIED, off.status)
+        assertEquals(PermissionAction.OPEN_SETTINGS, off.action)
+        assertEquals(PermissionAction.NONE, row(permissionRows(34, true, true, emptySet(), emptySet()), AppPermission.INTERNET).action)
+    }
 }

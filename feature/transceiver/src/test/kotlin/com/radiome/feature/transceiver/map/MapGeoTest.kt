@@ -100,4 +100,30 @@ class MapGeoTest {
         assertEquals("passwd", OfflineMaps.sanitize("../../etc/passwd"))
         assertEquals("map", OfflineMaps.sanitize(""))
     }
+
+    @Test
+    fun tileNumbersMatchTheSlippyMapScheme() {
+        assertEquals(0, MapGeo.tileX(-180.0, 0))
+        assertEquals(0, MapGeo.tileY(0.0, 0))
+        // Yerevan at zoom 10.
+        assertEquals(638, MapGeo.tileX(44.4991, 10))
+        assertEquals(386, MapGeo.tileY(40.1792, 10))
+        // Edges clamp instead of leaving the grid.
+        assertEquals(1023, MapGeo.tileX(180.0, 10))
+        assertEquals(1023, MapGeo.tileY(-89.0, 10))
+    }
+
+    @Test
+    fun savePlanStaysWithinTheTilePolicy() {
+        // A few streets of Yerevan at zoom 15.
+        val plan = MapGeo.planSave(40.19, 40.17, 44.52, 44.49, 15.0)!!
+        assertTrue(plan.sumOf { it.count } <= MapGeo.MAX_SAVE_TILES)
+        assertTrue(plan.any { it.z == 15 })
+        assertTrue(plan.any { it.z > 15 }) // closer zooms fit too
+        assertEquals(plan.map { it.z }.sorted(), plan.map { it.z })
+        // The whole country at street zoom is far too much: zoom in first.
+        assertNull(MapGeo.planSave(41.3, 38.8, 46.6, 43.4, 15.0))
+        // Zoomed out, the same country fits.
+        assertTrue(MapGeo.planSave(41.3, 38.8, 46.6, 43.4, 8.0) != null)
+    }
 }

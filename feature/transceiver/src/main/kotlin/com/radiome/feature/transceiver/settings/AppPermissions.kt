@@ -5,6 +5,9 @@ enum class AppPermission(val title: String, val purpose: String) {
     MICROPHONE("Microphone", "Hears the radio's audio so RadioMe can decode incoming bursts."),
     NOTIFICATIONS("Notifications", "Shows the ongoing \"Listening\" notification with its Stop button."),
     PHOTOS("Photos", "Lets you choose an image to send."),
+    LOCATION("Location", "Puts you on the map and lets you send your position, always encrypted."),
+    LOCATION_SERVICES("Location services (GPS)", "The phone's own location switch. RadioMe can't find you while it is off."),
+    INTERNET("Internet", "Downloads map tiles and keeps them for offline use. Radio traffic never uses the internet."),
 }
 
 enum class PermissionStatus { GRANTED, DENIED, NOT_NEEDED }
@@ -46,6 +49,10 @@ fun permissionRows(
     notificationsEnabled: Boolean,
     askedBefore: Set<AppPermission>,
     showRationale: Set<AppPermission>,
+    locationGranted: Boolean = false,
+    preciseLocation: Boolean = false,
+    locationServicesOn: Boolean = true,
+    mapDownloadsOn: Boolean = true,
 ): List<PermissionRow> {
     fun runtimeRow(p: AppPermission, granted: Boolean, grantNote: String?): PermissionRow = when {
         granted -> PermissionRow(p, PermissionStatus.GRANTED, PermissionAction.REVOKE, null)
@@ -74,7 +81,30 @@ fun permissionRows(
         AppPermission.PHOTOS, PermissionStatus.NOT_NEEDED, PermissionAction.NONE,
         "No access needed: you pick each image in Android's photo picker, and RadioMe sees only that image.",
     )
-    return listOf(mic, notifications, photos)
+    val location = when {
+        // Approximate only: the position can be kilometres off, so offer the upgrade to precise.
+        locationGranted && !preciseLocation -> PermissionRow(
+            AppPermission.LOCATION, PermissionStatus.GRANTED,
+            if (AppPermission.LOCATION !in askedBefore || AppPermission.LOCATION in showRationale) PermissionAction.REQUEST else PermissionAction.OPEN_SETTINGS,
+            "Approximate only: your position can be off by up to 3 km. Allow precise location for a correct map.",
+        )
+        else -> runtimeRow(AppPermission.LOCATION, locationGranted, "Needed to show where you are and to send your position.")
+    }
+    val services = PermissionRow(
+        AppPermission.LOCATION_SERVICES,
+        if (locationServicesOn) PermissionStatus.GRANTED else PermissionStatus.DENIED,
+        PermissionAction.OPEN_SETTINGS,
+        if (locationServicesOn) null else "Turn location on in Android's settings.",
+    )
+    val internet = PermissionRow(
+        AppPermission.INTERNET, PermissionStatus.GRANTED, PermissionAction.NONE,
+        if (mapDownloadsOn) {
+            "Allowed when the app is installed. Map downloads are on; turn them off in Map, Offline maps."
+        } else {
+            "Allowed when the app is installed. Map downloads are off, so RadioMe doesn't use the internet."
+        },
+    )
+    return listOf(mic, notifications, photos, location, services, internet)
 }
 
 /** Android 13, the first release with POST_NOTIFICATIONS and Context.revokeSelfPermissionOnKill. */
