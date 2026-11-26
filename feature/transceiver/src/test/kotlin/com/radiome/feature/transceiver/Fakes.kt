@@ -13,6 +13,7 @@ import com.radiome.feature.transceiver.image.ImageCodec
 import com.radiome.feature.transceiver.link.RouteInfo
 import com.radiome.feature.transceiver.link.TransceiverClient
 import com.radiome.feature.transceiver.link.TransferHistory
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,8 +54,13 @@ class FakeHistory : TransferHistory {
 /** "Encodes" to a byte count that grows with pixels and quality, like a real codec would. */
 class FakeCodec(private val width: Int = 640, private val height: Int = 480) : ImageCodec {
     var encodes = 0
-    override suspend fun load(uri: String, maxEdge: Int): RasterImage =
-        RasterImage(width, height, IntArray(width * height) { 0xFF336699.toInt() })
+    /** When set, load() waits for it, to simulate a slow decode. */
+    var gate: CompletableDeferred<Unit>? = null
+
+    override suspend fun load(uri: String, maxEdge: Int): RasterImage {
+        gate?.await()
+        return RasterImage(width, height, IntArray(width * height) { 0xFF336699.toInt() })
+    }
 
     override fun encodeWebp(image: RasterImage, quality: Int): ByteArray {
         encodes++

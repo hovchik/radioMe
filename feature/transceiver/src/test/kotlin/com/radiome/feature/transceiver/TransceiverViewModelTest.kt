@@ -6,6 +6,7 @@ import com.radiome.core.protocol.image.MaxEdge
 import com.radiome.core.protocol.payload.CompressionMode
 import com.radiome.core.protocol.payload.ContentType
 import com.radiome.feature.transceiver.settings.SettingsRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -95,6 +96,23 @@ class TransceiverViewModelTest {
         assertEquals(ContentType.IMAGE_WEBP, payload.type)
         assertEquals(CompressionMode.NEVER, options.compression)
         waitUntil { vm.compose.value.image == null }
+    }
+
+    @Test
+    fun presetChangedWhileTheImageIsStillLoadingIsApplied() {
+        val gate = CompletableDeferred<Unit>()
+        codec.gate = gate
+        vm.onImagePicked("content://media/picked/2")
+        assertTrue(vm.compose.value.image!!.busy)
+
+        // The decode is still running: changing the preset must not cancel it.
+        vm.onImagePresetChange(vm.compose.value.image!!.preset.copy(maxEdge = MaxEdge.PX_128))
+        gate.complete(Unit)
+
+        waitUntil { vm.compose.value.image?.bytes != null }
+        val draft = vm.compose.value.image!!
+        assertFalse(draft.busy)
+        assertEquals(128, draft.width)
     }
 
     @Test
