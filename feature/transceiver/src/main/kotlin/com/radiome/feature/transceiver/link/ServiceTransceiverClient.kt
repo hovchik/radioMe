@@ -79,6 +79,9 @@ class ServiceTransceiverClient(
             }
         }
     }
+    override val pttDevice: StateFlow<String?> = service
+        .flatMapLatest { it?.pttDevice ?: flowOf(null) }
+        .stateIn(scope, SharingStarted.Eagerly, null)
     override val route: StateFlow<RouteInfo?> = service
         .flatMapLatest { it?.route ?: flowOf(null) }
         .map { r -> r?.let { RouteInfo(it.mode, it.inputName, it.outputName) } }

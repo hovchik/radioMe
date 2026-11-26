@@ -33,6 +33,7 @@ class FakeClient : TransceiverClient {
     override val transfers = MutableStateFlow<Map<Int, TransferTelemetry>>(emptyMap())
     override val events = MutableSharedFlow<LinkEvent>(extraBufferCapacity = 16)
     override val route: StateFlow<RouteInfo?> = MutableStateFlow(null)
+    override val pttDevice: StateFlow<String?> = MutableStateFlow(null)
 
     val sent = mutableListOf<Pair<Payload, TransferOptions>>()
     var nextSid = 0x1234

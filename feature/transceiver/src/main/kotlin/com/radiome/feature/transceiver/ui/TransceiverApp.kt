@@ -67,6 +67,7 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
     val keyBusy by viewModel.keyBusy.collectAsStateWithLifecycle()
     val now by viewModel.now.collectAsStateWithLifecycle()
     val queue by viewModel.queue.collectAsStateWithLifecycle()
+    val pttDevice by viewModel.pttDevice.collectAsStateWithLifecycle()
     val queueActions = remember(viewModel) {
         QueueActions(viewModel::onAutoSpeed, viewModel::queueText, viewModel::queueImage, viewModel::removeQueued)
     }
@@ -240,6 +241,7 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
                     keyBusy = keyBusy,
                     onSetPassphrase = viewModel::setGroupPassphrase,
                     onClearKey = { viewModel.clearGroupKey() },
+                    pttDevice = pttDevice,
                     modifier = modifier,
                 )
             }

@@ -525,6 +525,8 @@ class TransceiverViewModel @Inject constructor(
     /** The whole history as plain text, for sharing or saving. */
     fun historyText(): String = HistoryExport.text(historyItems.value)
 
+    val pttDevice: StateFlow<String?> get() = client.pttDevice
+
     /** Input spectrum for the waterfall; the link computes it only while this is collected. */
     val waterfall: Flow<FloatArray> get() = client.waterfall
 

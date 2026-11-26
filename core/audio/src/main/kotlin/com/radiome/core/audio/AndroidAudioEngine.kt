@@ -35,6 +35,12 @@ data class AudioEngineConfig(
     val muteTailMs: Int = 150,
     /** Digital gain applied to transmitted samples. */
     val outputGain: Float = 1f,
+    /** How the radio is keyed; [PttMode.VOX_TONE] switches playback to stereo. */
+    val pttMode: PttMode = PttMode.VOX,
+    /** With a keyed PTT: time between keying and the first sample, for the radio to switch to transmit. */
+    val pttLeadMs: Int = 150,
+    /** With a keyed PTT: hold after the last sample, so the end of the burst is not cut. */
+    val pttTailMs: Int = 60,
 )
 
 /**
@@ -95,6 +101,12 @@ class AndroidAudioEngine(
     }
     private val txDispatcher = txExecutor.asCoroutineDispatcher()
     private val writeBuffer = ShortArray(4800)
+    private val stereo = config.pttMode == PttMode.VOX_TONE
+    private val stereoBuffer = ShortArray(2 * 2400)
+    private var tonePhase = 0.0
+
+    /** Keys the radio around each transmission (serial RTS/DTR); null for VOX. */
+    @Volatile var ptt: PttKeyer? = null
 
     override val input: Flow<FloatArray> = flow {
         for (block in filled) {
@@ -191,17 +203,36 @@ class AndroidAudioEngine(
         val t = ensureTrack()
         guard.beginTransmit()
         audioManager.requestAudioFocus(focusRequest)
+        val keyer = ptt?.takeIf { it.ready }
         try {
+            if (keyer != null) {
+                keyer.key(true)
+                Thread.sleep(config.pttLeadMs.toLong())
+            }
             val start = t.playbackHeadPosition.toLong() and 0xFFFFFFFFL
             t.play()
             var pos = 0
             while (pos < samples.size) {
                 ensureActive()
-                val n = minOf(writeBuffer.size, samples.size - pos)
-                Pcm.floatToPcm16(samples, pos, writeBuffer, n, outputGain)
+                val buf: ShortArray
+                val n: Int
+                val shorts: Int
+                if (stereo) {
+                    n = minOf(stereoBuffer.size / 2, samples.size - pos)
+                    tonePhase = Pcm.floatToPcm16StereoWithTone(
+                        samples, pos, stereoBuffer, n, outputGain, VOX_TONE_HZ, VOX_TONE_LEVEL, sampleRate, tonePhase,
+                    )
+                    buf = stereoBuffer
+                    shorts = 2 * n
+                } else {
+                    n = minOf(writeBuffer.size, samples.size - pos)
+                    Pcm.floatToPcm16(samples, pos, writeBuffer, n, outputGain)
+                    buf = writeBuffer
+                    shorts = n
+                }
                 var off = 0
-                while (off < n) {
-                    val w = t.write(writeBuffer, off, n - off, AudioTrack.WRITE_BLOCKING)
+                while (off < shorts) {
+                    val w = t.write(buf, off, shorts - off, AudioTrack.WRITE_BLOCKING)
                     check(w >= 0) { "AudioTrack.write failed: $w" }
                     off += w
                 }
@@ -219,6 +250,10 @@ class AndroidAudioEngine(
                 t.pause()
                 t.flush()
             }
+            if (keyer != null) {
+                runCatching { Thread.sleep(config.pttTailMs.toLong()) }
+                keyer.key(false)
+            }
             audioManager.abandonAudioFocusRequest(focusRequest)
             guard.endTransmit()
         }
@@ -226,18 +261,19 @@ class AndroidAudioEngine(
 
     private fun ensureTrack(): AudioTrack {
         track?.let { return it }
-        val minBuf = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val mask = if (stereo) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
+        val minBuf = AudioTrack.getMinBufferSize(sampleRate, mask, AudioFormat.ENCODING_PCM_16BIT)
         val t = AudioTrack.Builder()
             .setAudioAttributes(playbackAttributes)
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setChannelMask(mask)
                     .build(),
             )
             .setTransferMode(AudioTrack.MODE_STREAM)
-            .setBufferSizeInBytes(maxOf(minBuf * 2, sampleRate / 5 * 2)) // at least 200 ms
+            .setBufferSizeInBytes(maxOf(minBuf * 2, sampleRate / 5 * 2 * (if (stereo) 2 else 1))) // at least 200 ms
             .build()
         check(t.state == AudioTrack.STATE_INITIALIZED) { "AudioTrack failed to initialise" }
         preferredOutput?.let { t.preferredDevice = it }
@@ -274,7 +310,14 @@ class AndroidAudioEngine(
         filled.close()
         track?.release()
         track = null
+        ptt?.close()
         txDispatcher.close()
+    }
+
+    private companion object {
+        /** Right-channel keying tone for VOX-tone PTT: well inside any audio interface's passband. */
+        const val VOX_TONE_HZ = 1_000.0
+        const val VOX_TONE_LEVEL = 0.7f
     }
 }
 
