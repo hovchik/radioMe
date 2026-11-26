@@ -55,8 +55,9 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
         viewModel.messages.collect { snackbar.showSnackbar(it) }
     }
 
-    val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-        if (result[Manifest.permission.RECORD_AUDIO] == true) {
+    // The request may hold only POST_NOTIFICATIONS, so check the microphone grant itself. Notifications are optional.
+    val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             viewModel.startListening()
         }
     }

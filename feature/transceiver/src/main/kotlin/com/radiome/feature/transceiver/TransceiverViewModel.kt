@@ -117,7 +117,10 @@ class TransceiverViewModel @Inject constructor(
 
     private var sourceImage: RasterImage? = null
     private var prepared: PreparedImage? = null
-    private var imageJob: Job? = null
+    /** Decoding the picked file. Preset changes must not cancel it. */
+    private var loadJob: Job? = null
+    /** Resize + WebP encode with the current preset; restarted on every preset change. */
+    private var encodeJob: Job? = null
 
     fun onDraftChange(text: String) {
         _compose.update { it.copy(draft = text, textEstimate = estimate(text, it.profile)) }
@@ -148,16 +151,20 @@ class TransceiverViewModel @Inject constructor(
 
     /** [uri] is the content:// URI the photo picker returned. */
     fun onImagePicked(uri: String) {
-        imageJob?.cancel()
+        loadJob?.cancel()
+        encodeJob?.cancel()
+        sourceImage = null
+        prepared = null
         _compose.update { it.copy(image = ImageDraftUi(preset = settings.value.imagePreset(), busy = true)) }
-        imageJob = viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             val raster = runCatching { codec.load(uri) }.getOrElse {
                 if (it is CancellationException) throw it
                 _compose.update { c -> c.copy(image = c.image?.copy(busy = false, error = "Could not open that image.")) }
                 return@launch
             }
             sourceImage = raster
-            prepareNow()
+            // Encode in its own job so a preset change from here on cancels only the encode.
+            prepareImage()
         }
     }
 
@@ -170,8 +177,10 @@ class TransceiverViewModel @Inject constructor(
     }
 
     private fun prepareImage() {
-        imageJob?.cancel()
-        imageJob = viewModelScope.launch { prepareNow() }
+        // Still loading: the load finishes by encoding with whatever preset is current then.
+        if (sourceImage == null) return
+        encodeJob?.cancel()
+        encodeJob = viewModelScope.launch { prepareNow() }
     }
 
     private suspend fun prepareNow() {
@@ -194,7 +203,8 @@ class TransceiverViewModel @Inject constructor(
     }
 
     fun clearImage() {
-        imageJob?.cancel()
+        loadJob?.cancel()
+        encodeJob?.cancel()
         sourceImage = null
         prepared = null
         _compose.update { it.copy(image = null) }
