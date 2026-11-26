@@ -80,6 +80,9 @@ class SettingsRepository(
             beaconProfile = enumOr(this[BEACON_PROFILE], d.beaconProfile),
             adaptiveSpeed = this[ADAPTIVE] ?: d.adaptiveSpeed,
             groupMode = this[GROUP_MODE] ?: d.groupMode,
+            showWaterfall = this[WATERFALL] ?: d.showWaterfall,
+            largeText = this[LARGE_TEXT] ?: d.largeText,
+            haptics = this[HAPTICS] ?: d.haptics,
         ).sanitized()
     }
 
@@ -107,6 +110,9 @@ class SettingsRepository(
         this[BEACON_PROFILE] = s.beaconProfile.name
         this[ADAPTIVE] = s.adaptiveSpeed
         this[GROUP_MODE] = s.groupMode
+        this[WATERFALL] = s.showWaterfall
+        this[LARGE_TEXT] = s.largeText
+        this[HAPTICS] = s.haptics
     }
 
     private companion object {
@@ -132,6 +138,9 @@ class SettingsRepository(
         val BEACON_PROFILE = stringPreferencesKey("beacon_profile")
         val ADAPTIVE = booleanPreferencesKey("adaptive_speed")
         val GROUP_MODE = booleanPreferencesKey("group_mode")
+        val WATERFALL = booleanPreferencesKey("show_waterfall")
+        val LARGE_TEXT = booleanPreferencesKey("large_text")
+        val HAPTICS = booleanPreferencesKey("haptics")
         const val QUICK_SEPARATOR = "\n"
 
         inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =

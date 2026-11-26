@@ -20,6 +20,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -363,5 +364,26 @@ class TransceiverViewModelTest {
         assertEquals(draft.name, payload.name)
         assertEquals(2_000, payload.bytes.size)
         waitUntil { vm.compose.value.file == null }
+    }
+
+    @Test
+    fun onlyConfirmationsOfOurOwnMessagesBuzz() = runBlocking {
+        settings.update { it.copy(haptics = true) }
+        waitUntil { vm.settings.value.haptics }
+        val buzzes = java.util.concurrent.atomic.AtomicInteger()
+        val job = scope.launch { vm.buzz.collect { buzzes.incrementAndGet() } }
+        vm.startListening()
+
+        // A beacon's confirmation: its session did not go through the view model.
+        client.events.tryEmit(LinkEvent.Delivered(0x7777, by = "EK1A"))
+        Thread.sleep(200)
+        assertEquals(0, buzzes.get())
+
+        vm.onDraftChange("hello")
+        vm.sendText()
+        waitUntil { client.sent.size == 1 }
+        client.events.tryEmit(LinkEvent.Delivered(client.nextSid - 1, by = "EK1A"))
+        waitUntil { buzzes.get() == 1 }
+        job.cancel()
     }
 }

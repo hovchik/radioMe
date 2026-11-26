@@ -31,7 +31,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.Density
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -71,6 +76,10 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
 
     LaunchedEffect(viewModel) {
         viewModel.messages.collect { snackbar.showSnackbar(it) }
+    }
+    val haptics = LocalHapticFeedback.current
+    LaunchedEffect(viewModel) {
+        viewModel.buzz.collect { haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
     }
 
     // The request may hold only POST_NOTIFICATIONS, so check the microphone grant itself. Notifications are optional.
@@ -164,73 +173,84 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
         },
     )
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbar) },
-        bottomBar = {
-            NavigationBar {
-                Tab.entries.forEach { t ->
-                    NavigationBarItem(
-                        selected = tab == t,
-                        onClick = { tab = t },
-                        icon = { Icon(t.icon, contentDescription = null) },
-                        label = { Text(t.label) },
-                    )
+    LargeText(settings.largeText) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbar) },
+            bottomBar = {
+                NavigationBar {
+                    Tab.entries.forEach { t ->
+                        NavigationBarItem(
+                            selected = tab == t,
+                            onClick = { tab = t },
+                            icon = { Icon(t.icon, contentDescription = null) },
+                            label = { Text(t.label) },
+                        )
+                    }
                 }
+            },
+        ) { padding ->
+            val modifier = Modifier.padding(padding)
+            when (tab) {
+                Tab.RADIO -> RadioScreen(
+                    radio = radio,
+                    compose = compose,
+                    restartPending = restartPending,
+                    onStart = startListening,
+                    onStop = viewModel::stopListening,
+                    onRestart = viewModel::restartLink,
+                    onTestTone = { viewModel.testTone() },
+                    onDraftChange = viewModel::onDraftChange,
+                    onProfileChange = { viewModel.onProfileChange(it) },
+                    onSendText = viewModel::sendText,
+                    onPickImage = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    onImagePreset = viewModel::onImagePresetChange,
+                    onClearImage = viewModel::clearImage,
+                    onSendImage = viewModel::sendImage,
+                    onRequestCorrections = { viewModel.requestCorrections(it) },
+                    onCancel = { viewModel.cancel(it) },
+                    linkTest = linkTest,
+                    heard = heard,
+                    quickMessages = settings.quickMessages,
+                    onLinkTest = { viewModel.startLinkTest() },
+                    onApplyLinkTest = viewModel::applyLinkTestRecommendation,
+                    onDismissLinkTest = viewModel::dismissLinkTest,
+                    onToChange = viewModel::onToChange,
+                    onQuickMessage = viewModel::sendQuickMessage,
+                    queue = queue,
+                    queueActions = queueActions,
+                    fileActions = fileActions,
+                    waterfall = if (settings.showWaterfall) viewModel.waterfall else null,
+                    modifier = modifier,
+                )
+                Tab.MAP -> MapScreen(
+                    positions = positions,
+                    hasKey = groupKey != null,
+                    fingerprint = groupKey?.fingerprint,
+                    now = now,
+                    onSendPosition = { sendPosition() },
+                    onClear = { viewModel.clearPositions() },
+                    modifier = modifier,
+                )
+                Tab.HISTORY -> HistoryScreen(history, historyActions, modifier)
+                Tab.SETTINGS -> SettingsScreen(
+                    settings = settings,
+                    onChange = viewModel::updateSettings,
+                    onBeforeRevokeMicrophone = viewModel::stopListening,
+                    groupKeyFingerprint = groupKey?.fingerprint,
+                    keyBusy = keyBusy,
+                    onSetPassphrase = viewModel::setGroupPassphrase,
+                    onClearKey = { viewModel.clearGroupKey() },
+                    modifier = modifier,
+                )
             }
-        },
-    ) { padding ->
-        val modifier = Modifier.padding(padding)
-        when (tab) {
-            Tab.RADIO -> RadioScreen(
-                radio = radio,
-                compose = compose,
-                restartPending = restartPending,
-                onStart = startListening,
-                onStop = viewModel::stopListening,
-                onRestart = viewModel::restartLink,
-                onTestTone = { viewModel.testTone() },
-                onDraftChange = viewModel::onDraftChange,
-                onProfileChange = { viewModel.onProfileChange(it) },
-                onSendText = viewModel::sendText,
-                onPickImage = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                onImagePreset = viewModel::onImagePresetChange,
-                onClearImage = viewModel::clearImage,
-                onSendImage = viewModel::sendImage,
-                onRequestCorrections = { viewModel.requestCorrections(it) },
-                onCancel = { viewModel.cancel(it) },
-                linkTest = linkTest,
-                heard = heard,
-                quickMessages = settings.quickMessages,
-                onLinkTest = { viewModel.startLinkTest() },
-                onApplyLinkTest = viewModel::applyLinkTestRecommendation,
-                onDismissLinkTest = viewModel::dismissLinkTest,
-                onToChange = viewModel::onToChange,
-                onQuickMessage = viewModel::sendQuickMessage,
-                queue = queue,
-                queueActions = queueActions,
-                fileActions = fileActions,
-                modifier = modifier,
-            )
-            Tab.MAP -> MapScreen(
-                positions = positions,
-                hasKey = groupKey != null,
-                fingerprint = groupKey?.fingerprint,
-                now = now,
-                onSendPosition = { sendPosition() },
-                onClear = { viewModel.clearPositions() },
-                modifier = modifier,
-            )
-            Tab.HISTORY -> HistoryScreen(history, historyActions, modifier)
-            Tab.SETTINGS -> SettingsScreen(
-                settings = settings,
-                onChange = viewModel::updateSettings,
-                onBeforeRevokeMicrophone = viewModel::stopListening,
-                groupKeyFingerprint = groupKey?.fingerprint,
-                keyBusy = keyBusy,
-                onSetPassphrase = viewModel::setGroupPassphrase,
-                onClearKey = { viewModel.clearGroupKey() },
-                modifier = modifier,
-            )
         }
     }
+}
+
+/** "Larger text" setting: scales fonts by 1.3 on top of the system font size. */
+@Composable
+private fun LargeText(on: Boolean, content: @Composable () -> Unit) {
+    if (!on) return content()
+    val d = LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides Density(d.density, d.fontScale * 1.3f), content = content)
 }
