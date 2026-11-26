@@ -34,7 +34,7 @@ import kotlinx.coroutines.flow.stateIn
 class ServiceTransceiverClient(
     context: Context,
     private val recording: LinkRecording,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
 ) : TransceiverClient {
     private val appContext = context.applicationContext
     private val service = MutableStateFlow<TransceiverService?>(null)
