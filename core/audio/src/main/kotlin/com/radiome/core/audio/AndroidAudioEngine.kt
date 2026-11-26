@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
@@ -170,9 +171,26 @@ class AndroidAudioEngine(
         }
     }
 
+    /** Device the last transmission actually played through ("Speaker", "USB audio"...), for the status line. */
+    @Volatile var lastOutputDevice: String? = null
+        private set
+
+    private val playbackAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .build()
+
+    // Transient focus pauses music or video apps for the length of a burst, so they neither mix into the
+    // transmitted audio nor mask it.
+    private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        .setAudioAttributes(playbackAttributes)
+        .setOnAudioFocusChangeListener { }
+        .build()
+
     override suspend fun play(samples: FloatArray) = withContext(txDispatcher) {
         val t = ensureTrack()
         guard.beginTransmit()
+        audioManager.requestAudioFocus(focusRequest)
         try {
             val start = t.playbackHeadPosition.toLong() and 0xFFFFFFFFL
             t.play()
@@ -189,6 +207,7 @@ class AndroidAudioEngine(
                 }
                 pos += n
             }
+            lastOutputDevice = t.routedDevice?.let(::describe)
             // Wait until the last sample has left the device, not just the buffer.
             val deadline = System.nanoTime() + (samples.size * 1_000_000_000L / sampleRate) + 2_000_000_000L
             while (((t.playbackHeadPosition.toLong() and 0xFFFFFFFFL) - start) < samples.size && System.nanoTime() < deadline) {
@@ -200,6 +219,7 @@ class AndroidAudioEngine(
                 t.pause()
                 t.flush()
             }
+            audioManager.abandonAudioFocusRequest(focusRequest)
             guard.endTransmit()
         }
     }
@@ -208,12 +228,7 @@ class AndroidAudioEngine(
         track?.let { return it }
         val minBuf = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val t = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build(),
-            )
+            .setAudioAttributes(playbackAttributes)
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -229,6 +244,18 @@ class AndroidAudioEngine(
         track = t
         return t
     }
+
+    private fun describe(d: AudioDeviceInfo): String = when (d.type) {
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Speaker"
+        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Earpiece"
+        AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired"
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth " + d.productName
+        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB " + d.productName
+        else -> d.productName?.toString()?.ifBlank { null } ?: "Audio output"
+    }
+
+    /** True when the media volume is all the way down: transmissions would be silent. */
+    fun isOutputMuted(): Boolean = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) == 0
 
     private fun disableEffects(sessionId: Int) {
         if (AutomaticGainControl.isAvailable()) AutomaticGainControl.create(sessionId)?.enabled = false

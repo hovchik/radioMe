@@ -38,6 +38,18 @@ interface TransceiverClient {
     /** Restart the link so lead-in and ARQ settings take effect. No-op when the radio is off. */
     fun restartLink()
 
-    /** Media volume as a fraction of maximum, or null when the radio is off. */
-    fun outputVolumeFraction(): Float?
+    /** Queue a 2 s pilot tone through the normal transmit path. False when the radio is off. */
+    suspend fun sendTestTone(): Boolean
+
+    /** Output volume and device, or null when the radio is off. */
+    fun outputStatus(): OutputStatus?
 }
+
+data class OutputStatus(
+    /** Media volume as a fraction of maximum. */
+    val volume: Float,
+    /** Media volume is zero: transmissions are silent. */
+    val muted: Boolean,
+    /** Device the last transmission played through, once something has been sent. */
+    val lastDevice: String?,
+)

@@ -69,4 +69,6 @@ sealed interface LinkEvent {
     data class AckSent(override val sessionId: Int) : LinkEvent
     data class Delivered(override val sessionId: Int) : LinkEvent
     data class Failed(override val sessionId: Int, val reason: String) : LinkEvent
+    /** Playing a transmission threw. [sessionId] is [LinkController.TEST_TONE_SESSION] for a test tone. */
+    data class AudioOutputFailed(override val sessionId: Int, val reason: String) : LinkEvent
 }

@@ -163,6 +163,10 @@ class SenderSession(val transfer: OutgoingTransfer, private val arq: ArqConfig) 
         phase = SenderPhase.CANCELLED
     }
 
+    /** The transfer cannot continue (for example the audio output failed). */
+    fun abort(reason: String): SenderAction =
+        if (phase == SenderPhase.COMPLETE || phase == SenderPhase.CANCELLED) SenderAction.Ignore else fail(reason)
+
     fun chunkStates(): List<ChunkState> = List(transfer.totalChunks) { i ->
         when {
             phase == SenderPhase.COMPLETE -> ChunkState.OK

@@ -98,5 +98,9 @@ class ServiceTransceiverClient(
         service.value?.restartLink()
     }
 
-    override fun outputVolumeFraction(): Float? = service.value?.audioEngine?.outputVolumeFraction()
+    override suspend fun sendTestTone(): Boolean = service.value?.onLink { it.sendTestTone() } != null
+
+    override fun outputStatus(): OutputStatus? = service.value?.audioEngine?.let {
+        OutputStatus(it.outputVolumeFraction(), it.isOutputMuted(), it.lastOutputDevice)
+    }
 }

@@ -10,6 +10,7 @@ import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.TransferOptions
 import com.radiome.data.TransferRecord
 import com.radiome.feature.transceiver.image.ImageCodec
+import com.radiome.feature.transceiver.link.OutputStatus
 import com.radiome.feature.transceiver.link.RouteInfo
 import com.radiome.feature.transceiver.link.TransceiverClient
 import com.radiome.feature.transceiver.link.TransferHistory
@@ -42,7 +43,15 @@ class FakeClient : TransceiverClient {
     override suspend fun cancel(sessionId: Int) = Unit
     override fun applyLive(route: RoutePreference, outputGain: Float) { live = route to outputGain }
     override fun restartLink() { restarts++ }
-    override fun outputVolumeFraction(): Float? = if (running.value) 0.7f else null
+    var muted = false
+    var testTones = 0
+    override suspend fun sendTestTone(): Boolean {
+        if (!running.value) return false
+        testTones++
+        return true
+    }
+    override fun outputStatus(): OutputStatus? =
+        if (running.value) OutputStatus(if (muted) 0f else 0.7f, muted, "Speaker") else null
 }
 
 class FakeHistory : TransferHistory {

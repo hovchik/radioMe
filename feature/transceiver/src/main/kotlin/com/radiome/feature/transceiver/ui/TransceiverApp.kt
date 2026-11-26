@@ -101,6 +101,7 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
                 onStart = startListening,
                 onStop = viewModel::stopListening,
                 onRestart = viewModel::restartLink,
+                onTestTone = { viewModel.testTone() },
                 onDraftChange = viewModel::onDraftChange,
                 onProfileChange = viewModel::onProfileChange,
                 onSendText = viewModel::sendText,

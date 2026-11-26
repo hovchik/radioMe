@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,11 +30,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.radiome.core.protocol.link.Direction
 import com.radiome.core.protocol.session.ChunkState
@@ -73,7 +76,11 @@ fun LevelMeter(dbfs: Double, level: InputLevel, modifier: Modifier = Modifier) {
 /** One cell per chunk, coloured by state; wraps to as many rows as needed. */
 @Composable
 fun ChunkGrid(states: List<ChunkState>, modifier: Modifier = Modifier) {
-    if (states.isEmpty()) return
+    if (states.isEmpty()) {
+        // Same height as one row of cells, so the card does not grow when the chunk count becomes known.
+        Spacer(modifier.fillMaxWidth().height(8.dp))
+        return
+    }
     val columns = 40
     val rows = (states.size + columns - 1) / columns
     val ok = RadioColors.ok
@@ -118,26 +125,23 @@ fun TransferCardView(
                 Text(
                     "$arrow ${card.name.ifBlank { card.sessionLabel }}",
                     style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
                 AssistChip(onClick = {}, label = { Text(phaseLabel(card.phase)) })
             }
             LinearProgressIndicator(progress = { card.progress }, modifier = Modifier.fillMaxWidth())
             ChunkGrid(card.chunkStates)
+            // Fixed set of single-line rows: numbers change while chunks arrive, the card's height does not.
             val snr = if (card.snrDb.isNaN()) "-" else "%.1f dB".format(card.snrDb)
-            Text(
-                "${card.receivedChunks}/${card.totalChunks} chunks · FEC fixed ${card.fecCorrectedBytes} B in " +
-                    "${card.fecRepairedChunks} chunks · loss %.1f%% · SNR $snr".format(card.lossPercent),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (card.missing.isNotEmpty()) {
-                val preview = card.missing.take(12).joinToString(", ") + if (card.missing.size > 12) " ..." else ""
-                Text("Missing ${card.missing.size}: $preview", style = MaterialTheme.typography.bodySmall, color = RadioColors.missing)
-            }
-            if (card.repairRounds > 0) {
-                Text("Repair rounds: ${card.repairRounds}", style = MaterialTheme.typography.bodySmall)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatLine("${card.receivedChunks}/${card.totalChunks} chunks · loss %.1f%% · SNR $snr".format(card.lossPercent))
+            StatLine("FEC fixed ${card.fecCorrectedBytes} B in ${card.fecRepairedChunks} chunks · repair rounds ${card.repairRounds}")
+            val missing = if (card.missing.isEmpty()) "Missing: none" else
+                "Missing ${card.missing.size}: " + card.missing.take(12).joinToString(", ") + if (card.missing.size > 12) " ..." else ""
+            StatLine(missing, if (card.missing.isEmpty()) null else RadioColors.missing)
+            // Keeps its height when the buttons come and go.
+            Row(Modifier.heightIn(min = 40.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (card.canRequestCorrections) {
                     OutlinedButton(onClick = onRequestCorrections) {
                         Icon(Icons.Filled.Refresh, contentDescription = null)
@@ -155,6 +159,17 @@ fun TransferCardView(
             }
         }
     }
+}
+
+@Composable
+private fun StatLine(text: String, color: Color? = null) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = color ?: MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 fun phaseLabel(phase: String): String = when (phase) {

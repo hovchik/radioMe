@@ -21,6 +21,7 @@ import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.ChunkState
 import com.radiome.core.protocol.session.Packetizer
 import com.radiome.core.protocol.session.TransferOptions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -70,7 +71,8 @@ class LinkController(
     private val _events = MutableSharedFlow<LinkEvent>(replay = 0, extraBufferCapacity = 256)
     val events: SharedFlow<LinkEvent> = _events.asSharedFlow()
 
-    private class TxJob(val sessionId: Int, val bursts: List<PhyBurst>, val onDone: () -> Unit)
+    /** Either modem [bursts] or, for a test tone, [raw] samples. */
+    private class TxJob(val sessionId: Int, val bursts: List<PhyBurst>, val onDone: () -> Unit, val raw: FloatArray? = null)
 
     private val txQueue = Channel<TxJob>(Channel.UNLIMITED)
     private var transmitting = false
@@ -136,6 +138,23 @@ class LinkController(
 
     private var currentTxSession = -1
 
+    /**
+     * Queue a plain [ModemConfig.PILOT_HZ] tone so the user can check that audio reaches the speaker or cable and
+     * set the radio's VOX and volume. It waits for a clear channel like any other transmission.
+     */
+    fun sendTestTone(durationMs: Int = 2000) {
+        val n = durationMs.coerceIn(100, 10_000) * fs / 1000
+        val ramp = minOf(ModemConfig.FADE_SAMPLES, n / 2)
+        val w = 2 * Math.PI * ModemConfig.PILOT_HZ / fs
+        val amp = engine.config.amplitude
+        val tone = FloatArray(n) { i ->
+            val edge = minOf(i, n - 1 - i)
+            val env = if (edge >= ramp) 1.0 else 0.5 - 0.5 * kotlin.math.cos(Math.PI * edge / ramp)
+            (amp * env * kotlin.math.sin(w * i)).toFloat()
+        }
+        txQueue.trySend(TxJob(TEST_TONE_SESSION, emptyList(), {}, raw = tone))
+    }
+
     private fun enqueue(sessionId: Int, bursts: List<PhyBurst>, onDone: () -> Unit) {
         txQueue.trySend(TxJob(sessionId, bursts, onDone))
     }
@@ -149,13 +168,20 @@ class LinkController(
             transmitting = true
             currentTxSession = job.sessionId
             _state.value = LinkState.TRANSMITTING
+            var failure: Exception? = null
             try {
                 // A cancelled child (cancel()) just ends this job; cancelling the scope propagates as usual.
                 coroutineScope {
                     currentPlay = launch {
-                        for (b in job.bursts) audio.play(engine.modulate(b))
+                        val raw = job.raw
+                        if (raw != null) audio.play(raw) else for (b in job.bursts) audio.play(engine.modulate(b))
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The audio device failed. Keep the link alive for later transmissions and say why.
+                failure = e
             } finally {
                 currentPlay = null
                 currentTxSession = -1
@@ -164,7 +190,16 @@ class LinkController(
                 lastActivity = clock
                 _state.value = LinkState.LISTENING
             }
-            job.onDone()
+            if (failure != null) {
+                val reason = "audio output failed: ${failure.message ?: failure::class.simpleName}"
+                emit(LinkEvent.AudioOutputFailed(job.sessionId, reason))
+                senders[job.sessionId]?.let { sender ->
+                    awaiting.remove(job.sessionId)
+                    if (sender.abort(reason) is SenderAction.Failed) emit(LinkEvent.Failed(job.sessionId, reason))
+                }
+            } else {
+                job.onDone()
+            }
             publish()
         }
     }
@@ -361,5 +396,10 @@ class LinkController(
             val id = random.nextInt(1, 0xFFFF)
             if (id !in senders && id !in receivers) return id
         }
+    }
+
+    companion object {
+        /** Session id carried by events about a test tone (no real session uses it). */
+        const val TEST_TONE_SESSION = -1
     }
 }

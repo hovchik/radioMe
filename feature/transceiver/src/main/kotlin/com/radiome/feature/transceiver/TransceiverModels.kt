@@ -7,6 +7,7 @@ import com.radiome.core.protocol.arq.ReceiverPhase
 import com.radiome.core.protocol.arq.SenderPhase
 import com.radiome.core.protocol.image.ImagePreset
 import com.radiome.core.protocol.link.Direction
+import com.radiome.core.protocol.link.LinkController
 import com.radiome.core.protocol.link.LinkEvent
 import com.radiome.core.protocol.link.LinkState
 import com.radiome.core.protocol.link.TransferTelemetry
@@ -17,6 +18,8 @@ import com.radiome.core.protocol.session.AirtimeEstimator
 import com.radiome.core.protocol.session.ChunkState
 import com.radiome.core.protocol.session.TransferOptions
 import com.radiome.core.audio.VolumeAdvice
+import com.radiome.core.audio.volumeAdvice
+import com.radiome.feature.transceiver.link.OutputStatus
 import com.radiome.feature.transceiver.link.RouteInfo
 import kotlin.math.roundToInt
 
@@ -37,8 +40,21 @@ data class RadioUi(
     val burstProgress: Float = 0f,
     val erasedSymbols: Int = 0,
     val volumeAdvice: VolumeAdvice? = null,
+    val outputMuted: Boolean = false,
+    val outputDevice: String? = null,
     val transfers: List<TransferCard> = emptyList(),
-)
+) {
+    /** The one most important hint for the status card, or null. One slot, so the card never changes height. */
+    val hint: String? get() = when {
+        !running -> null
+        outputMuted -> "Media volume is muted, so nothing is transmitted. Turn the volume up to about 70%."
+        linkState == LinkState.TRANSMITTING -> null
+        inputLevel == InputLevel.HOT -> "Input is clipping. Turn the radio volume down or move the phone away."
+        volumeAdvice == VolumeAdvice.TOO_LOW -> "Media volume is low. Set it to about 70% so the radio's VOX opens reliably."
+        volumeAdvice == VolumeAdvice.CLIPPING_RISK -> "Media volume is near maximum and may distort. About 70% works best."
+        else -> null
+    }
+}
 
 data class TransferCard(
     val sessionId: Int,
@@ -118,7 +134,7 @@ object Presenters {
         route: RouteInfo?,
         rx: DemodTelemetry,
         transfers: Map<Int, TransferTelemetry>,
-        volume: VolumeAdvice?,
+        output: OutputStatus?,
         hidden: Set<Int>,
     ) = RadioUi(
         running = running,
@@ -131,7 +147,9 @@ object Presenters {
         syncCorrelation = rx.syncCorrelation,
         burstProgress = if (rx.symbolsTotal > 0) rx.symbolsDone.toFloat() / rx.symbolsTotal else 0f,
         erasedSymbols = rx.erasedSymbols,
-        volumeAdvice = volume,
+        volumeAdvice = output?.let { volumeAdvice(it.volume) },
+        outputMuted = output?.muted == true,
+        outputDevice = output?.lastDevice,
         transfers = cards(transfers.values, hidden),
     )
 
@@ -189,6 +207,8 @@ object Presenters {
         }
         is LinkEvent.Delivered -> "Delivered: the other station confirmed transfer %04X".format(e.sessionId)
         is LinkEvent.Failed -> "Transfer %04X failed: %s".format(e.sessionId, e.reason)
+        // For transfers the Failed event that follows says it; a test tone has no transfer.
+        is LinkEvent.AudioOutputFailed -> if (e.sessionId == LinkController.TEST_TONE_SESSION) "Test tone failed: ${e.reason}" else null
         is LinkEvent.CorrectionsNeeded -> if (autoNack) null else
             "${e.missing.size} chunks missing from %04X. Send a correction request when the channel is clear.".format(e.sessionId)
         else -> null
