@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [TransferEntity::class, ChunkEntity::class, PositionEntity::class], version = 3, exportSchema = false)
+@Database(entities = [TransferEntity::class, ChunkEntity::class, PositionEntity::class], version = 4, exportSchema = false)
 abstract class RadioDatabase : RoomDatabase() {
     abstract fun transfers(): TransferDao
     abstract fun positions(): PositionDao
@@ -34,7 +34,14 @@ abstract class RadioDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+        /** v4: delivery receipts (who confirmed an outgoing transfer). */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transfers ADD COLUMN deliveredTo TEXT")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 
         fun create(context: Context): RadioDatabase =
             Room.databaseBuilder(context.applicationContext, RadioDatabase::class.java, "radiome.db")

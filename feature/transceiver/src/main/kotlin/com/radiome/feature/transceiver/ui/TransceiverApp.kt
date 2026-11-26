@@ -55,6 +55,10 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
     val groupKey by viewModel.groupKey.collectAsStateWithLifecycle()
     val keyBusy by viewModel.keyBusy.collectAsStateWithLifecycle()
     val now by viewModel.now.collectAsStateWithLifecycle()
+    val queue by viewModel.queue.collectAsStateWithLifecycle()
+    val queueActions = remember(viewModel) {
+        QueueActions(viewModel::onAutoSpeed, viewModel::queueText, viewModel::queueImage, viewModel::removeQueued)
+    }
     var tab by rememberSaveable { mutableStateOf(Tab.RADIO) }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -129,7 +133,7 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
                 onRestart = viewModel::restartLink,
                 onTestTone = { viewModel.testTone() },
                 onDraftChange = viewModel::onDraftChange,
-                onProfileChange = viewModel::onProfileChange,
+                onProfileChange = { viewModel.onProfileChange(it) },
                 onSendText = viewModel::sendText,
                 onPickImage = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 onImagePreset = viewModel::onImagePresetChange,
@@ -145,6 +149,8 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
                 onDismissLinkTest = viewModel::dismissLinkTest,
                 onToChange = viewModel::onToChange,
                 onQuickMessage = viewModel::sendQuickMessage,
+                queue = queue,
+                queueActions = queueActions,
                 modifier = modifier,
             )
             Tab.MAP -> MapScreen(

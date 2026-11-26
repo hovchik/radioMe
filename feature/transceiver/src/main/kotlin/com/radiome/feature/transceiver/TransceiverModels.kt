@@ -17,6 +17,7 @@ import com.radiome.core.protocol.link.TransferTelemetry
 import com.radiome.core.protocol.payload.CompressionMode
 import com.radiome.core.protocol.payload.ContentType
 import com.radiome.core.protocol.payload.Deflate
+import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.AirtimeEstimator
 import com.radiome.core.protocol.session.ChunkState
 import com.radiome.core.protocol.session.TransferOptions
@@ -126,7 +127,19 @@ data class LinkTestUi(
     val visible: Boolean get() = running || report != null || error != null
 }
 
+/** A message waiting in the send queue. */
+data class QueuedItem(
+    val id: Long,
+    val label: String,
+    val payload: Payload,
+    val options: TransferOptions,
+    /** Pick the profile when it goes out (Auto speed) instead of using [options]' profile. */
+    val autoProfile: Boolean,
+)
+
 data class ComposeUi(
+    /** Pick the profile from recent results ([com.radiome.core.protocol.link.AdaptiveRate]). */
+    val auto: Boolean = false,
     /** Addressee callsign; blank sends to every station. */
     val to: String = "",
     val draft: String = "",

@@ -84,6 +84,8 @@ sealed interface LinkEvent {
         val unreadable: String? = null,
     ) : LinkEvent
     data class AckSent(override val sessionId: Int) : LinkEvent
+    /** A broadcast receiver confirmed; the session stays open for the others. */
+    data class AckReceived(override val sessionId: Int, val by: String?) : LinkEvent
     /** [by] is the confirming station's callsign, when it identified itself. */
     data class Delivered(override val sessionId: Int, val by: String? = null) : LinkEvent
     /** A STATION frame was decoded: [callsign] is on the air. */

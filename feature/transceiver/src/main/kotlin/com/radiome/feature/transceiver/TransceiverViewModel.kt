@@ -7,7 +7,13 @@ import com.radiome.core.protocol.image.ImagePipeline
 import com.radiome.core.protocol.image.ImagePreset
 import com.radiome.core.protocol.image.PreparedImage
 import com.radiome.core.protocol.image.RasterImage
+import com.radiome.core.protocol.link.AdaptiveRate
+import com.radiome.core.protocol.link.Direction
 import com.radiome.core.protocol.link.LinkEvent
+import com.radiome.core.protocol.session.Packetizer
+import com.radiome.core.protocol.session.TransferOptions
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import com.radiome.core.protocol.payload.CompressionMode
 import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.AirtimeEstimator
@@ -131,7 +137,8 @@ class TransceiverViewModel @Inject constructor(
     fun applyLinkTestRecommendation() {
         val r = _linkTest.value.recommendation ?: return
         updateSettings { it.copy(defaultProfile = r.profile, parityPercent = r.parityPercent) }
-        onProfileChange(r.profile)
+        rate.reset(r.profile)
+        onProfileChange(r.profile, keepAuto = true)
         _messages.trySend("Now sending ${Presenters.recommendationLabel(r)} by default.")
     }
 
@@ -139,8 +146,124 @@ class TransceiverViewModel @Inject constructor(
         _linkTest.value = LinkTestUi()
     }
 
+    // ------------------------------------------------------------------------------------------ auto speed
+
+    private val rate = AdaptiveRate(settings.value.defaultProfile)
+
+    private class Tracked(val profile: ModemProfile, var firstLoss: Double? = null)
+
+    /** Our outgoing sessions, to learn from how they went. */
+    private val tracked = HashMap<Int, Tracked>()
+
+    fun onAutoSpeed(on: Boolean) {
+        _compose.update { it.copy(auto = on) }
+        if (on) onProfileChange(rate.current, keepAuto = true)
+        viewModelScope.launch { settingsRepository.update { it.copy(adaptiveSpeed = on) } }
+    }
+
+    private fun learn(sid: Int, failed: Boolean) {
+        val t = tracked.remove(sid) ?: return
+        val next = rate.onOutcome(t.profile, if (failed) 100.0 else t.firstLoss ?: 0.0, failed)
+        if (_compose.value.auto && next != _compose.value.profile) {
+            onProfileChange(next, keepAuto = true)
+            _messages.trySend("Auto speed: now ${com.radiome.feature.transceiver.ui.profileLabel(next)}.")
+        }
+    }
+
+    /** Every send goes through here so Auto speed can follow the outcome. */
+    private suspend fun dispatch(payload: Payload, options: TransferOptions): Int? {
+        val sid = client.send(payload, options) ?: return null
+        tracked[sid] = Tracked(options.profile)
+        ended.update { it - sid } // session ids are reused
+        return sid
+    }
+
+    // ------------------------------------------------------------------------------------------ queue
+
+    private val _queue = MutableStateFlow<List<QueuedItem>>(emptyList())
+    /** Messages waiting to go out one after another: the next starts when the previous one has finished. */
+    val queue: StateFlow<List<QueuedItem>> = _queue.asStateFlow()
+    private var queueIds = 0L
+    /** Outgoing sessions that were delivered or failed (from link events). */
+    private val ended = MutableStateFlow<Set<Int>>(emptySet())
+
+    fun queueText() {
+        val c = _compose.value
+        if (c.draft.isBlank() || !encryptionReady()) return
+        enqueue(c.draft.take(40), Payload.text(c.draft), settings.value.transferOptions(c.profile, c.to), c.auto)
+        _compose.update { it.copy(draft = "", textEstimate = null) }
+    }
+
+    fun queueImage() {
+        val p = prepared ?: return
+        val c = _compose.value
+        if (c.image?.busy == true || !encryptionReady()) return
+        val options = settings.value.transferOptions(c.profile, c.to).copy(compression = CompressionMode.NEVER)
+        enqueue("Image ${p.width}x${p.height}, ${Presenters.formatBytes(p.sizeBytes)}", p.payload, options, c.auto)
+        clearImage()
+    }
+
+    fun removeQueued(id: Long) {
+        _queue.update { q -> q.filterNot { it.id == id } }
+    }
+
+    private fun enqueue(label: String, payload: Payload, options: TransferOptions, auto: Boolean) {
+        _queue.update { it + QueuedItem(++queueIds, label, payload, options, auto) }
+        if (!client.running.value) _messages.trySend("Queued. It goes out when the radio is on.")
+    }
+
+    private suspend fun runQueue() {
+        while (true) {
+            val next = _queue.first { it.isNotEmpty() }.first()
+            client.running.first { it }
+            // One at a time: wait until none of our transfers is still on air or waiting for its answer.
+            client.transfers.first { m -> m.values.none { it.direction == Direction.OUTGOING && !Presenters.isFinished(it) } }
+            if (_queue.value.firstOrNull()?.id != next.id) continue // removed while we waited
+            val options = if (next.autoProfile) next.options.copy(profile = rate.current) else next.options
+            // The group key may have been removed since this was queued: drop it with a notice rather than send it in clear.
+            if (options.encrypt && keys.key.value == null) {
+                _queue.update { q -> q.filterNot { it.id == next.id } }
+                _messages.trySend("Removed \"${next.label}\" from the queue: it was to go encrypted, but no group key is set now.")
+                continue
+            }
+            val sid = try {
+                dispatch(next.payload, options)
+            } catch (e: IllegalStateException) {
+                _queue.update { q -> q.filterNot { it.id == next.id } }
+                _messages.trySend("Could not send \"${next.label}\": ${e.message}")
+                continue
+            } ?: continue // the radio went off; try again when it is back
+            _queue.update { q -> q.filterNot { it.id == next.id } }
+            withTimeoutOrNull(QUEUE_ITEM_TIMEOUT_MS) {
+                // Done when it is delivered or failed, or when its link goes away (radio stopped or restarted), so the
+                // rest of the queue does not wait for the timeout.
+                var seen = false
+                combine(client.transfers, ended, client.running) { m, done, running ->
+                    val t = m[sid]
+                    val gone = seen && t == null
+                    if (t != null) seen = true
+                    sid in done || t?.let(Presenters::isFinished) == true || gone || !running
+                }.first { it }
+            }
+        }
+    }
+
     private fun onLinkEvent(e: LinkEvent) {
         when (e) {
+            is LinkEvent.NackReceived -> tracked[e.sessionId]?.let { t ->
+                if (t.firstLoss == null) {
+                    val total = client.transfers.value[e.sessionId]?.totalChunks ?: 0
+                    if (total > 0) t.firstLoss = e.requested.count { it != Packetizer.HEADER_CHUNK } * 100.0 / total
+                }
+            }
+            is LinkEvent.Delivered -> {
+                ended.update { it + e.sessionId }
+                learn(e.sessionId, failed = false)
+            }
+            is LinkEvent.Failed -> {
+                ended.update { it + e.sessionId }
+                learn(e.sessionId, failed = true)
+            }
             is LinkEvent.StationHeard -> _heard.update { Presenters.heard(it, e.callsign, clock(), e.snrDb) }
             is LinkEvent.LinkTestReported -> {
                 val ours = _linkTest.value.sessionId == e.sessionId && !e.measuredHere
@@ -267,7 +390,7 @@ class TransceiverViewModel @Inject constructor(
         viewModelScope.launch {
             warnIfMuted()
             val c = _compose.value
-            if (client.send(Payload.text(text), settings.value.transferOptions(c.profile, c.to)) == null) {
+            if (dispatch(Payload.text(text), settings.value.transferOptions(c.profile, c.to)) == null) {
                 _messages.trySend("Turn the radio on first.")
             }
         }
@@ -275,9 +398,13 @@ class TransceiverViewModel @Inject constructor(
 
     private var profileChosen = false
 
-    fun onProfileChange(profile: ModemProfile) {
+    /** A manual choice turns Auto speed off; [keepAuto] is for Auto's own changes. */
+    fun onProfileChange(profile: ModemProfile, keepAuto: Boolean = false) {
         profileChosen = true
-        _compose.update { it.copy(profile = profile, textEstimate = estimate(it.draft, profile)) }
+        if (!keepAuto && _compose.value.auto) {
+            viewModelScope.launch { settingsRepository.update { it.copy(adaptiveSpeed = false) } }
+        }
+        _compose.update { it.copy(profile = profile, auto = it.auto && keepAuto, textEstimate = estimate(it.draft, profile)) }
         if (sourceImage != null) prepareImage()
     }
 
@@ -290,7 +417,7 @@ class TransceiverViewModel @Inject constructor(
         viewModelScope.launch {
             _compose.update { it.copy(sending = true) }
             warnIfMuted()
-            val sid = client.send(Payload.text(c.draft), settings.value.transferOptions(c.profile, c.to))
+            val sid = dispatch(Payload.text(c.draft), settings.value.transferOptions(c.profile, c.to))
             if (sid == null) {
                 _messages.trySend("Turn the radio on first.")
                 _compose.update { it.copy(sending = false) }
@@ -376,7 +503,7 @@ class TransceiverViewModel @Inject constructor(
             _compose.update { it.copy(sending = true) }
             val options = settings.value.transferOptions(c.profile, c.to).copy(compression = CompressionMode.NEVER)
             warnIfMuted()
-            val sid = client.send(p.payload, options)
+            val sid = dispatch(p.payload, options)
             _compose.update { it.copy(sending = false) }
             if (sid == null) _messages.trySend("Turn the radio on first.") else clearImage()
         }
@@ -413,12 +540,17 @@ class TransceiverViewModel @Inject constructor(
             // Only fill in the stored default profile; never overwrite a choice the user made while the settings
             // file was still loading. (Image presets are read from settings when an image is picked.)
             val s = settingsRepository.load()
-            if (!profileChosen) _compose.update { it.copy(profile = s.defaultProfile, textEstimate = estimate(it.draft, s.defaultProfile)) }
+            rate.reset(s.defaultProfile)
+            if (!profileChosen) {
+                _compose.update { it.copy(profile = s.defaultProfile, auto = s.adaptiveSpeed, textEstimate = estimate(it.draft, s.defaultProfile)) }
+            }
         }
+        viewModelScope.launch { runQueue() }
     }
 
     private companion object {
         const val TICK_MS = 2_000L
+        const val QUEUE_ITEM_TIMEOUT_MS = 30 * 60_000L
         const val MUTED = "Media volume is muted, so the radio will hear nothing. Turn it up to about 70%."
     }
 }

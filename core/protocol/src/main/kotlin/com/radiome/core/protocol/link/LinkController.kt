@@ -114,7 +114,10 @@ class LinkController(
     private val receivers = LinkedHashMap<Int, ReceiverSession>()
     private val senders = LinkedHashMap<Int, SenderSession>()
     private val startedAt = HashMap<Int, Long>()
-    private val pendingOverEnd = LinkedHashSet<Int>()
+    /** Incoming session -> quiet (ms) to wait before answering: the turnaround, plus a random backoff in broadcasts. */
+    private val pendingOverEnd = LinkedHashMap<Int, Int>()
+    /** Broadcast sender session -> chunks requested by any receiver since the last repair. */
+    private val broadcastNacks = HashMap<Int, java.util.TreeSet<Int>>()
     /** Sender session -> quiet samples heard since its last transmission ended. */
     private val awaiting = LinkedHashMap<Int, Long>()
     private val lastSnr = HashMap<Int, Double>()
@@ -352,7 +355,7 @@ class LinkController(
                     val rs = receiverFor(f)
                     if (station != null) peers[f.sessionId] = station
                     if (rs.onFrame(f, r.status, r.correctedBytes)) store.save(rs.snapshot())
-                    pendingOverEnd += f.sessionId
+                    pendingOverEnd.getOrPut(f.sessionId) { answerDelayMs(f.sessionId) }
                     lastSnr[f.sessionId] = raw.snrDb
                 }
                 FrameType.NACK -> if (forUs) {
@@ -380,6 +383,13 @@ class LinkController(
         }
         for ((sid, requested) in nacks) {
             val s = senders[sid] ?: continue
+            if (s.isBroadcast) {
+                // Several receivers answer one after another: collect them all, repair once.
+                broadcastNacks.getOrPut(sid) { java.util.TreeSet() } += requested
+                awaiting[sid] = 0
+                emit(LinkEvent.NackReceived(sid, requested.distinct().sorted()))
+                continue
+            }
             awaiting.remove(sid)
             emit(LinkEvent.NackReceived(sid, requested.distinct().sorted()))
             onSenderAction(s, s.onNack(requested))
@@ -387,7 +397,16 @@ class LinkController(
         for ((sid, by) in acks) {
             val s = senders[sid] ?: continue
             awaiting.remove(sid)
-            if (by != null) ackedBy.getOrPut(sid) { ArrayList() }.let { if (by !in it) it += by }
+            // In a broadcast an unidentified confirmation still counts, so it gets a placeholder name.
+            val who = by ?: if (s.isBroadcast) "?" else null
+            if (who != null) ackedBy.getOrPut(sid) { ArrayList() }.let { if (who !in it) it += who }
+            if (s.isBroadcast) {
+                // Others may still be missing chunks; the session completes when a response window stays quiet.
+                awaiting[sid] = 0
+                emit(LinkEvent.AckReceived(sid, by))
+                publish()
+                continue
+            }
             onSenderAction(s, s.onAck(), by)
         }
     }
@@ -435,11 +454,13 @@ class LinkController(
 
     private fun onQuiet(samples: Long) {
         val quietMs = (clock - lastActivity) * 1000 / fs
-        if (pendingOverEnd.isNotEmpty() && quietMs >= arq.turnaroundMs) {
-            val ids = pendingOverEnd.toList()
-            pendingOverEnd.clear()
-            ids.forEach(::overEnded)
-            publish()
+        if (pendingOverEnd.isNotEmpty()) {
+            val ids = pendingOverEnd.filterValues { quietMs >= it }.keys.toList()
+            if (ids.isNotEmpty()) {
+                ids.forEach { pendingOverEnd.remove(it) }
+                ids.forEach(::overEnded)
+                publish()
+            }
         }
         if (pendingProbes.isNotEmpty() && quietMs >= arq.turnaroundMs) {
             // Answer once the whole probe sequence is over: the last profile was heard, or there has been time for
@@ -466,16 +487,42 @@ class LinkController(
             }
         }
         if (awaiting.isEmpty()) return
+        val collect = broadcastCollectMs().toLong() * fs / 1000
+        val broadcastLimit = maxOf(limit, collect + 2L * fs)
         val expired = ArrayList<Int>()
+        val repairNow = ArrayList<Int>()
         for (e in awaiting.entries) {
             e.setValue(e.value + samples)
-            if (e.value >= limit) expired += e.key
+            val broadcast = senders[e.key]?.isBroadcast == true
+            when {
+                broadcast && !broadcastNacks[e.key].isNullOrEmpty() && e.value >= collect -> repairNow += e.key
+                e.value >= (if (broadcast) broadcastLimit else limit) -> expired += e.key
+            }
+        }
+        for (sid in repairNow) {
+            awaiting.remove(sid)
+            val wanted = broadcastNacks.remove(sid)!!.toList()
+            senders[sid]?.let { onSenderAction(it, it.onNack(wanted)) }
         }
         for (sid in expired) {
             awaiting.remove(sid)
-            senders[sid]?.let { onSenderAction(it, it.onResponseTimeout()) }
+            val s = senders[sid] ?: continue
+            val confirmed = ackedBy[sid].orEmpty()
+            if (s.isBroadcast && confirmed.isNotEmpty()) {
+                // A quiet window after confirmations: everyone who could hear us has what they need.
+                onSenderAction(s, s.onAck(), confirmed.joinToString(", "))
+            } else {
+                onSenderAction(s, s.onResponseTimeout())
+            }
         }
     }
+
+    /** Quiet before a receiver answers [sid]: the turnaround, plus a random slot when it is a broadcast. */
+    private fun answerDelayMs(sid: Int): Int =
+        arq.turnaroundMs + if (peers[sid]?.broadcast == true && arq.broadcastBackoffMs > 0) random.nextInt(arq.broadcastBackoffMs + 1) else 0
+
+    /** How long a broadcast sender keeps listening for more correction requests before repairing. */
+    private fun broadcastCollectMs(): Int = arq.turnaroundMs + arq.broadcastBackoffMs + BROADCAST_MARGIN_MS
 
     private fun answerLinkTest(sid: Int) {
         probeStart.remove(sid)
@@ -628,5 +675,6 @@ class LinkController(
     companion object {
         /** Session id carried by events about a test tone (no real session uses it). */
         const val TEST_TONE_SESSION = -1
+        private const val BROADCAST_MARGIN_MS = 1500
     }
 }

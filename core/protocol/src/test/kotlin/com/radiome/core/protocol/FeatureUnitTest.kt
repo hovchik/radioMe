@@ -141,4 +141,18 @@ class FeatureUnitTest {
         assertTrue(r.reason.startsWith("Nothing was heard"))
         assertNotNull(LinkTest.probeFrames(1, ModemProfile.FAST).single { it.chunkIndex == 0 })
     }
+
+    @Test
+    fun `adaptive rate steps down on loss and up after clean runs`() {
+        val r = com.radiome.core.protocol.link.AdaptiveRate(ModemProfile.STANDARD)
+        assertEquals(ModemProfile.STANDARD, r.onOutcome(ModemProfile.STANDARD, 0.0, false))
+        assertEquals(ModemProfile.FAST, r.onOutcome(ModemProfile.STANDARD, 0.0, false))
+        assertEquals(ModemProfile.FAST, r.onOutcome(ModemProfile.FAST, 5.0, false))
+        assertEquals(ModemProfile.STANDARD, r.onOutcome(ModemProfile.FAST, 30.0, false))
+        assertEquals(ModemProfile.STANDARD, r.onOutcome(ModemProfile.FAST, 0.0, false), "a stale outcome is ignored")
+        assertEquals(ModemProfile.ROBUST, r.onOutcome(ModemProfile.STANDARD, 0.0, true))
+        assertEquals(ModemProfile.ROBUST, r.onOutcome(ModemProfile.ROBUST, 100.0, true), "never below Robust")
+        r.reset(ModemProfile.FAST)
+        assertEquals(ModemProfile.FAST, r.current)
+    }
 }

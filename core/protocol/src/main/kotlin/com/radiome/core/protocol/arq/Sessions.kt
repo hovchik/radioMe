@@ -113,6 +113,8 @@ sealed interface SenderAction {
 
 class SenderSession(val transfer: OutgoingTransfer, private val arq: ArqConfig) {
     val sessionId: Int get() = transfer.sessionId
+    /** Many receivers: correction requests are merged and confirmations collected (see LinkController). */
+    val isBroadcast: Boolean get() = transfer.options.station?.broadcast == true
     var phase = SenderPhase.TRANSMITTING
         private set
     var repairRounds = 0

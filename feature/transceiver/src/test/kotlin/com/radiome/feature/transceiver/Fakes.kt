@@ -35,6 +35,7 @@ class FakeClient : TransceiverClient {
     override val route: StateFlow<RouteInfo?> = MutableStateFlow(null)
 
     val sent = mutableListOf<Pair<Payload, TransferOptions>>()
+    var nextSid = 0x1234
     var restarts = 0
     var live: Pair<RoutePreference, Float>? = null
 
@@ -43,7 +44,7 @@ class FakeClient : TransceiverClient {
     override suspend fun send(payload: Payload, options: TransferOptions): Int? {
         if (!running.value) return null
         sent += payload to options
-        return 0x1234
+        return nextSid++
     }
     override suspend fun requestCorrections(sessionId: Int) = false
     override suspend fun cancel(sessionId: Int) = Unit

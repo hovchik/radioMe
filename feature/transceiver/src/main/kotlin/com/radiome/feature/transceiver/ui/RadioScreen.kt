@@ -53,6 +53,7 @@ import com.radiome.feature.transceiver.ComposeUi
 import com.radiome.feature.transceiver.HeardStation
 import com.radiome.feature.transceiver.ImageDraftUi
 import com.radiome.feature.transceiver.LinkTestUi
+import com.radiome.feature.transceiver.QueuedItem
 import com.radiome.feature.transceiver.Presenters
 import com.radiome.feature.transceiver.RadioUi
 import kotlin.math.roundToInt
@@ -83,6 +84,8 @@ fun RadioScreen(
     onDismissLinkTest: () -> Unit,
     onToChange: (String) -> Unit,
     onQuickMessage: (String) -> Unit,
+    queue: List<QueuedItem>,
+    queueActions: QueueActions,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -98,8 +101,43 @@ fun RadioScreen(
         item {
             ComposeCard(
                 compose, radio.running, onDraftChange, onProfileChange, onSendText, onPickImage,
-                onImagePreset, onClearImage, onSendImage, heard, quickMessages, onToChange, onQuickMessage,
+                onImagePreset, onClearImage, onSendImage, heard, quickMessages, onToChange, onQuickMessage, queueActions,
             )
+        }
+        if (queue.isNotEmpty()) item { QueueCard(queue, radio.running, queueActions.onRemove) }
+    }
+}
+
+/** What the compose card needs for Auto speed and the send queue. */
+class QueueActions(
+    val onAuto: (Boolean) -> Unit,
+    val onQueueText: () -> Unit,
+    val onQueueImage: () -> Unit,
+    val onRemove: (Long) -> Unit,
+)
+
+@Composable
+private fun QueueCard(queue: List<QueuedItem>, running: Boolean, onRemove: (Long) -> Unit) {
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Queue (${queue.size})", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (running) "Sent one after another; the next starts when the previous one is delivered or fails."
+                else "Waiting for the radio to be turned on.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            queue.forEachIndexed { i, q ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${i + 1}. ${q.label}" + (q.options.station?.destination?.let { " · to $it" } ?: "") +
+                            if (q.autoProfile) " · auto" else " · ${profileLabel(q.options.profile)}",
+                        Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    IconButton(onClick = { onRemove(q.id) }) { Icon(Icons.Filled.Close, contentDescription = "Remove from queue") }
+                }
+            }
         }
     }
 }
@@ -256,6 +294,7 @@ private fun ComposeCard(
     quickMessages: List<String>,
     onToChange: (String) -> Unit,
     onQuickMessage: (String) -> Unit,
+    queueActions: QueueActions,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -277,9 +316,10 @@ private fun ComposeCard(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = compose.auto, onClick = { queueActions.onAuto(!compose.auto) }, label = { Text("Auto") })
                 ModemProfile.entries.forEach { p ->
                     FilterChip(
-                        selected = compose.profile == p,
+                        selected = !compose.auto && compose.profile == p,
                         onClick = { onProfileChange(p) },
                         label = { Text(profileLabel(p)) },
                     )
@@ -314,6 +354,7 @@ private fun ComposeCard(
                         Text("Image")
                     }
                     Spacer(Modifier.weight(1f))
+                    OutlinedButton(onClick = queueActions.onQueueText, enabled = compose.draft.isNotBlank()) { Text("Queue") }
                     Button(onClick = onSendText, enabled = running && compose.draft.isNotBlank() && !compose.sending) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
@@ -321,7 +362,7 @@ private fun ComposeCard(
                     }
                 }
             } else {
-                ImageDraft(image, compose.sending, running, onImagePreset, onClearImage, onSendImage)
+                ImageDraft(image, compose.sending, running, onImagePreset, onClearImage, onSendImage, queueActions.onQueueImage)
             }
         }
     }
@@ -335,6 +376,7 @@ private fun ImageDraft(
     onImagePreset: (ImagePreset) -> Unit,
     onClearImage: () -> Unit,
     onSendImage: () -> Unit,
+    onQueueImage: () -> Unit,
 ) {
     Row(verticalAlignment = Alignment.Top) {
         if (image.bytes != null) {
@@ -391,6 +433,9 @@ private fun ImageDraft(
         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
         Spacer(Modifier.width(6.dp))
         Text("Send image")
+    }
+    OutlinedButton(onClick = onQueueImage, enabled = image.bytes != null && !image.busy, modifier = Modifier.fillMaxWidth()) {
+        Text("Add image to queue")
     }
 }
 

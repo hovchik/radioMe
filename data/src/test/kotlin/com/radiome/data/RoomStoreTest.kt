@@ -86,6 +86,8 @@ class RoomStoreTest {
         val store = RoomSessionStore(db) { clock }
         repo.recordOutgoing(11, Payload.text("hello radio"), 1, "STANDARD", peer = "EK2B")
         repo.setOutgoingStatus(11, TransferStatus.DELIVERED)
+        repo.addDeliveredTo(11, "EK2B")
+        repo.addDeliveredTo(11, "EK3C, EK2B")
 
         val transfer = Packetizer.packetize(image, 22)
         val tracker = ChunkTracker(22)
@@ -103,6 +105,7 @@ class RoomStoreTest {
         assertEquals("EK1A", incoming.peer)
         val outgoing = history.last()
         assertEquals("EK2B", outgoing.peer)
+        assertEquals(listOf("EK2B", "EK3C"), outgoing.deliveredTo)
         assertEquals(TransferStatus.DELIVERED, outgoing.status)
         assertEquals("hello radio", outgoing.text)
     }
