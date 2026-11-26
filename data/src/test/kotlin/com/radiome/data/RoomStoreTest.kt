@@ -103,6 +103,7 @@ class RoomStoreTest {
         assertEquals(TransferStatus.COMPLETE, incoming.status)
         assertArrayEquals(image.bytes, incoming.payload)
         assertEquals("EK1A", incoming.peer)
+        assertFalse(incoming.broadcast)
         val outgoing = history.last()
         assertEquals("EK2B", outgoing.peer)
         assertEquals(listOf("EK2B", "EK3C"), outgoing.deliveredTo)
@@ -154,6 +155,17 @@ class RoomStoreTest {
         val ek1a = latest.single { it.callsign == "EK1A" }
         assertEquals(40.19, ek1a.position.latitude, 1e-9)
         assertTrue(latest.single { it.own }.callsign == "EK9Z")
+    }
+
+    @Test
+    fun incomingForEveryStationIsMarkedBroadcast() = runBlocking {
+        val repo = TransferRepository(db) { clock }
+        val store = RoomSessionStore(db) { clock }
+        val tracker = ChunkTracker(44)
+        Packetizer.packetize(image, 44).allFrames().forEach { tracker.accept(it, CodewordStatus.OK, 0) }
+        store.save(tracker.snapshot(0))
+        repo.markReceived(44, image, from = "EK1A", broadcast = true)
+        assertTrue(repo.observeHistory().first().single().broadcast)
     }
 
     @Test

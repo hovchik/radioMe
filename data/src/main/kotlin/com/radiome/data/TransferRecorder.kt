@@ -36,7 +36,7 @@ class TransferRecorder(
             link.events.collect { e ->
                 when (e) {
                     is LinkEvent.MessageReceived -> {
-                        repository.markReceived(e.sessionId, e.payload, e.from, e.encrypted, e.unreadable)
+                        repository.markReceived(e.sessionId, e.payload, e.from, e.encrypted, e.unreadable, broadcast = e.to.isNullOrBlank())
                         // Only positions that were sealed with our group key, from an identified station, go on the map.
                         if (e.payload.type == ContentType.POSITION && e.encrypted && e.unreadable == null && e.from != null) {
                             Position.decode(e.payload.bytes)?.let { positions?.addReceived(e.from!!, it, link.transfers.value[e.sessionId]?.snrDb) }

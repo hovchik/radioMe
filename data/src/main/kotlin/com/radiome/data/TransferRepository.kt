@@ -48,6 +48,8 @@ data class TransferRecord(
     val encrypted: Boolean = false,
     /** Callsigns that confirmed an outgoing transfer. */
     val deliveredTo: List<String> = emptyList(),
+    /** Incoming: addressed to every station, not to us. */
+    val broadcast: Boolean = false,
 )
 
 /**
@@ -108,15 +110,20 @@ class TransferRepository(
         it.copy(status = status.name)
     }
 
-    /** [unreadable]: it came encrypted and could not be opened; [payload] is then the sealed envelope. */
+    /**
+     * [unreadable]: it came encrypted and could not be opened; [payload] is then the sealed envelope.
+     * [broadcast]: the sender addressed it to every station.
+     */
     fun markReceived(
         sessionId: Int,
         payload: Payload,
         from: String? = null,
         encrypted: Boolean = false,
         unreadable: String? = null,
+        broadcast: Boolean = false,
     ) = updateLatest(sessionId, Direction.INCOMING) {
         it.copy(
+            broadcast = broadcast,
             peer = from ?: it.peer,
             encrypted = encrypted,
             status = TransferStatus.COMPLETE.name,
@@ -186,4 +193,5 @@ internal fun TransferEntity.toRecord() = TransferRecord(
     peer = peer,
     encrypted = encrypted,
     deliveredTo = deliveredTo?.split(",")?.filter { it.isNotEmpty() }.orEmpty(),
+    broadcast = broadcast,
 )
