@@ -343,4 +343,25 @@ class TransceiverViewModelTest {
         waitUntil { client.sent.size == 2 }
         assertEquals("second", client.sent[1].first.asText())
     }
+
+    @Test
+    fun pickedFileIsSentAsBinaryWithItsName() = runBlocking {
+        vm.attachFile("Expedition to Aragats summit day two.gpx", ByteArray(2_000) { (it % 7).toByte() })
+        val draft = vm.compose.value.file!!
+        assertTrue(draft.name.endsWith(".gpx"))
+        assertTrue(draft.estimate.airtimeMs > 0)
+
+        vm.attachFile("huge.bin", ByteArray(com.radiome.core.protocol.payload.Files.MAX_BYTES + 1))
+        assertTrue(withTimeout(2_000) { vm.messages.first() }.contains("KB can be sent"))
+        assertEquals(draft, vm.compose.value.file)
+
+        vm.startListening()
+        vm.sendFile()
+        waitUntil { client.sent.size == 1 }
+        val (payload, _) = client.sent.single()
+        assertEquals(ContentType.BINARY, payload.type)
+        assertEquals(draft.name, payload.name)
+        assertEquals(2_000, payload.bytes.size)
+        waitUntil { vm.compose.value.file == null }
+    }
 }
