@@ -193,7 +193,7 @@ object Presenters {
         val bytes = text.toByteArray(Charsets.UTF_8)
         val deflated = if (options.compression == CompressionMode.AUTO) Deflate.compress(bytes) else null
         val compressed = deflated != null && deflated.size < bytes.size
-        val wire = if (compressed) deflated!!.size else bytes.size
+        val wire = if (compressed) deflated.size else bytes.size
         val chunks = maxOf(1, (wire + options.chunkPayloadSize - 1) / options.chunkPayloadSize)
         return ComposeEstimate(bytes.size, wire, chunks, airtime.payloadMs(wire, options), compressed)
     }

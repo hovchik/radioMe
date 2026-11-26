@@ -135,7 +135,10 @@ class TransceiverViewModel @Inject constructor(
         _compose.update { it.copy(draft = text, textEstimate = estimate(text, it.profile)) }
     }
 
+    private var profileChosen = false
+
     fun onProfileChange(profile: ModemProfile) {
+        profileChosen = true
         _compose.update { it.copy(profile = profile, textEstimate = estimate(it.draft, profile)) }
         if (sourceImage != null) prepareImage()
     }
@@ -260,8 +263,10 @@ class TransceiverViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            // Only fill in the stored default profile; never overwrite a choice the user made while the settings
+            // file was still loading. (Image presets are read from settings when an image is picked.)
             val s = settingsRepository.load()
-            _compose.update { it.copy(profile = s.defaultProfile, image = it.image?.copy(preset = s.imagePreset())) }
+            if (!profileChosen) _compose.update { it.copy(profile = s.defaultProfile, textEstimate = estimate(it.draft, s.defaultProfile)) }
         }
     }
 
