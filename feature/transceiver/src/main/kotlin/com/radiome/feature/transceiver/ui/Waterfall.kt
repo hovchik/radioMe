@@ -26,6 +26,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.flow.Flow
 
 private const val ROWS = 80
@@ -40,7 +43,10 @@ private const val TOP_DB = -20f
 fun WaterfallCard(rows: Flow<FloatArray>, modifier: Modifier = Modifier) {
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(rows) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // Only while the app is on screen: stopping the collection turns the link's FFT off.
+    LaunchedEffect(rows, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
         rows.collect { row ->
             val b = bitmap.takeIf { it?.width == row.size } ?: Bitmap.createBitmap(row.size, ROWS, Bitmap.Config.ARGB_8888).also { bitmap = it }
             val pixels = IntArray(row.size * ROWS)
@@ -50,6 +56,7 @@ fun WaterfallCard(rows: Flow<FloatArray>, modifier: Modifier = Modifier) {
             for (i in row.indices) pixels[i] = heat((row[i] - FLOOR_DB) / (TOP_DB - FLOOR_DB))
             b.setPixels(pixels, 0, row.size, 0, 0, row.size, ROWS)
             tick++
+        }
         }
     }
     Card(modifier.fillMaxWidth()) {

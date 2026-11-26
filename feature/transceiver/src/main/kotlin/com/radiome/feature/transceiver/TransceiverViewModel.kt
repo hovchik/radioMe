@@ -253,7 +253,10 @@ class TransceiverViewModel @Inject constructor(
     }
 
     private fun onLinkEvent(e: LinkEvent) {
-        val noteworthy = (e is LinkEvent.MessageReceived && e.payload.type != ContentType.POSITION) || e is LinkEvent.Delivered
+        // Position beacons go out from PositionBeacon, not through dispatch(), so only sessions in `tracked` are
+        // messages the user sent; their confirmations buzz, a beacon's do not.
+        val noteworthy = (e is LinkEvent.MessageReceived && e.payload.type != ContentType.POSITION) ||
+            (e is LinkEvent.Delivered && e.sessionId in tracked)
         if (noteworthy && settings.value.haptics) _buzz.trySend(Unit)
         when (e) {
             is LinkEvent.NackReceived -> tracked[e.sessionId]?.let { t ->
