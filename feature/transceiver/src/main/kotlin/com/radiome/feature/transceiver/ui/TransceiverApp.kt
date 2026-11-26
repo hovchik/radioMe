@@ -71,7 +71,12 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-        if (mic && wanted.isEmpty()) viewModel.startListening() else permissions.launch(wanted.toTypedArray())
+        if (mic && wanted.isEmpty()) {
+            viewModel.startListening()
+        } else {
+            PermissionPrompts.markAsked(context, wanted)
+            permissions.launch(wanted.toTypedArray())
+        }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let { viewModel.onImagePicked(it.toString()) }
@@ -114,7 +119,7 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
                 modifier = modifier,
             )
             Tab.HISTORY -> HistoryScreen(history, { viewModel.deleteHistory(it) }, modifier)
-            Tab.SETTINGS -> SettingsScreen(settings, viewModel::updateSettings, modifier)
+            Tab.SETTINGS -> SettingsScreen(settings, viewModel::updateSettings, viewModel::stopListening, modifier)
         }
     }
 }

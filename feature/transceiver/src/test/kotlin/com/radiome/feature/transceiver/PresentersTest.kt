@@ -118,8 +118,10 @@ class PresentersTest {
     fun audioFailureMessages() {
         val tone = Presenters.eventMessage(LinkEvent.AudioOutputFailed(com.radiome.core.protocol.link.LinkController.TEST_TONE_SESSION, "boom"), true)
         assertTrue(tone!!.startsWith("Test tone failed"))
-        // For a transfer, the Failed event that follows carries the message.
-        assertNull(Presenters.eventMessage(LinkEvent.AudioOutputFailed(7, "boom"), true))
+        // For a transfer it ended, the Failed event that follows carries the message.
+        assertNull(Presenters.eventMessage(LinkEvent.AudioOutputFailed(7, "boom", transferFailed = true), true))
+        // A receiver's NACK or ACK that could not be played is reported on its own.
+        assertTrue(Presenters.eventMessage(LinkEvent.AudioOutputFailed(7, "boom"), true)!!.contains("0007"))
     }
 
     @Test

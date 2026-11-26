@@ -29,13 +29,21 @@ import com.radiome.feature.transceiver.settings.RadioSettings
 import kotlin.math.roundToInt
 
 @Composable
-fun SettingsScreen(settings: RadioSettings, onChange: ((RadioSettings) -> RadioSettings) -> Unit, modifier: Modifier = Modifier) {
+fun SettingsScreen(
+    settings: RadioSettings,
+    onChange: ((RadioSettings) -> RadioSettings) -> Unit,
+    onBeforeRevokeMicrophone: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Section("Permissions")
+        PermissionsSection(onBeforeRevokeMicrophone)
+
         Section("Radio")
         Choice("Audio route", RoutePreference.entries, settings.routePreference, {
             when (it) {
