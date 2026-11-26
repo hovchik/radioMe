@@ -88,6 +88,25 @@ class TransceiverViewModelTest {
     }
 
     @Test
+    fun openingAChatAddressesTheComposerAndResendGoesToTheSameStation() = runBlocking {
+        vm.openChat("ek2b")
+        assertEquals("EK2B", vm.compose.value.to)
+        vm.openChat(null)
+        assertEquals("", vm.compose.value.to)
+
+        client.startListening()
+        val failed = com.radiome.data.TransferRecord(
+            7, 0x77, com.radiome.core.protocol.link.Direction.OUTGOING, com.radiome.data.TransferStatus.FAILED, ContentType.TEXT,
+            "", "again", "again".toByteArray(), 1, 0, 0, 0.0, 0, "STANDARD", 0, 0, peer = "EK2B",
+        )
+        vm.resend(failed)
+        waitUntil { client.sent.size == 1 }
+        val (payload, options) = client.sent.single()
+        assertEquals("again", payload.asText())
+        assertEquals("EK2B", options.station?.destination)
+    }
+
+    @Test
     fun pickedImageIsPreparedResizedAndSentUncompressed() = runBlocking {
         client.startListening()
         vm.onImagePicked("content://media/picked/1")

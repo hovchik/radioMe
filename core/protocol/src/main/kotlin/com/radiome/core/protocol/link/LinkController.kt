@@ -657,6 +657,7 @@ class LinkController(
                 updatedAtMs = now,
                 peer = peers[r.sessionId]?.source?.ifEmpty { null },
                 preview = previewOf(t),
+                broadcast = peers[r.sessionId]?.isForEveryone == true,
             )
         }
         _transfers.value = map

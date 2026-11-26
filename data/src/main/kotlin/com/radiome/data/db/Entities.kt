@@ -42,6 +42,8 @@ data class TransferEntity(
     @ColumnInfo(defaultValue = "0") val encrypted: Boolean = false,
     /** Outgoing: callsigns that confirmed it, comma separated ("?" for an unidentified station). */
     val deliveredTo: String? = null,
+    /** Incoming: the sender addressed it to every station rather than to us. */
+    @ColumnInfo(defaultValue = "0") val broadcast: Boolean = false,
 )
 
 /** A received chunk of an incoming transfer. */

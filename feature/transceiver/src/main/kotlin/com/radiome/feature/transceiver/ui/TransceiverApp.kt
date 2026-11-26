@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Settings
@@ -48,6 +49,7 @@ import kotlinx.coroutines.launch
 
 private enum class Tab(val label: String, val icon: ImageVector) {
     RADIO("Radio", Icons.Filled.Home),
+    CHAT("Chat", Icons.Filled.Email),
     MAP("Map", Icons.Filled.LocationOn),
     HISTORY("History", Icons.AutoMirrored.Filled.List),
     SETTINGS("Settings", Icons.Filled.Settings),
@@ -74,6 +76,7 @@ fun TransceiverApp(
     val now by viewModel.now.collectAsStateWithLifecycle()
     val queue by viewModel.queue.collectAsStateWithLifecycle()
     val pttDevice by viewModel.pttDevice.collectAsStateWithLifecycle()
+    val chatThreads by viewModel.chatThreads.collectAsStateWithLifecycle()
     val queueActions = remember(viewModel) {
         QueueActions(viewModel::onAutoSpeed, viewModel::queueText, viewModel::queueImage, viewModel::removeQueued)
     }
@@ -206,6 +209,24 @@ fun TransceiverApp(
         },
     )
 
+    val pickImage = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+    val chatActions = remember(viewModel) {
+        ChatActions(
+            onOpen = viewModel::openChat,
+            onRead = viewModel::markChatRead,
+            onStartRadio = startListening,
+            onDraftChange = viewModel::onDraftChange,
+            onSendText = viewModel::sendText,
+            onQuickMessage = viewModel::sendQuickMessage,
+            onPickImage = pickImage,
+            onImagePreset = viewModel::onImagePresetChange,
+            onClearImage = viewModel::clearImage,
+            onSendImage = viewModel::sendImage,
+            onResend = viewModel::resend,
+            onRemoveQueued = viewModel::removeQueued,
+        )
+    }
+
     LargeText(settings.largeText) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbar) },
@@ -235,7 +256,7 @@ fun TransceiverApp(
                     onDraftChange = viewModel::onDraftChange,
                     onProfileChange = { viewModel.onProfileChange(it) },
                     onSendText = viewModel::sendText,
-                    onPickImage = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    onPickImage = pickImage,
                     onImagePreset = viewModel::onImagePresetChange,
                     onClearImage = viewModel::clearImage,
                     onSendImage = viewModel::sendImage,
@@ -254,6 +275,22 @@ fun TransceiverApp(
                     fileActions = fileActions,
                     voiceActions = voiceActions,
                     waterfall = if (settings.showWaterfall) viewModel.waterfall else null,
+                    modifier = modifier,
+                )
+                Tab.CHAT -> ChatScreen(
+                    threads = chatThreads,
+                    records = history,
+                    transfers = radio.transfers,
+                    queue = queue,
+                    compose = compose,
+                    running = radio.running,
+                    quickMessages = settings.quickMessages,
+                    now = now,
+                    actions = chatActions,
+                    queueActions = queueActions,
+                    fileActions = fileActions,
+                    voiceActions = voiceActions,
+                    historyActions = historyActions,
                     modifier = modifier,
                 )
                 Tab.MAP -> MapScreen(
