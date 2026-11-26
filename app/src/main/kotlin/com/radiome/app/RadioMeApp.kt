@@ -47,9 +47,15 @@ class RadioMeApp : Application(), TransceiverService.DependenciesProvider {
             override val callsign: String = s.callsign
             override val groupKey: ByteArray? = keys.current()?.encoded()
 
-            override fun onLinkStarted(link: LinkController, scope: CoroutineScope) = rec.attach(link, scope)
+            override fun onLinkStarted(link: LinkController, scope: CoroutineScope) {
+                rec.attach(link, scope)
+                RadioControls.onRunningChanged(this@RadioMeApp, true)
+            }
 
-            override fun onLinkStopped(link: LinkController) = rec.detach(link)
+            override fun onLinkStopped(link: LinkController) {
+                rec.detach(link)
+                RadioControls.onRunningChanged(this@RadioMeApp, false)
+            }
         }
     }
 }

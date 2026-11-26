@@ -54,7 +54,12 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 
 /** Whole app UI: radio dashboard and composer, history, settings. */
 @Composable
-fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
+fun TransceiverApp(
+    viewModel: TransceiverViewModel = hiltViewModel(),
+    /** The widget or quick-settings tile asked to turn the radio on. */
+    startRequested: Boolean = false,
+    onStartRequestHandled: () -> Unit = {},
+) {
     val radio by viewModel.radio.collectAsStateWithLifecycle()
     val compose by viewModel.compose.collectAsStateWithLifecycle()
     val history by viewModel.historyItems.collectAsStateWithLifecycle()
@@ -104,6 +109,12 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
         } else {
             PermissionPrompts.markAsked(context, wanted)
             permissions.launch(wanted.toTypedArray())
+        }
+    }
+    LaunchedEffect(startRequested) {
+        if (startRequested) {
+            onStartRequestHandled()
+            if (!viewModel.radio.value.running) startListening()
         }
     }
     // Location is asked for only when the user wants to send a position; the map itself needs no permission.
