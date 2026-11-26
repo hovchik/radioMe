@@ -53,6 +53,9 @@ import com.radiome.core.protocol.link.LinkState
 import com.radiome.feature.transceiver.ComposeUi
 import com.radiome.feature.transceiver.HeardStation
 import com.radiome.feature.transceiver.FileDraftUi
+import com.radiome.feature.transceiver.RecordingUi
+import com.radiome.feature.transceiver.VoiceDraftUi
+import androidx.compose.material.icons.filled.PlayArrow
 import kotlinx.coroutines.flow.Flow
 import com.radiome.feature.transceiver.ImageDraftUi
 import com.radiome.feature.transceiver.LinkTestUi
@@ -90,6 +93,7 @@ fun RadioScreen(
     queue: List<QueuedItem>,
     queueActions: QueueActions,
     fileActions: FileActions,
+    voiceActions: VoiceActions,
     /** Spectrum rows, or null when the waterfall is turned off. */
     waterfall: Flow<FloatArray>?,
     modifier: Modifier = Modifier,
@@ -109,6 +113,7 @@ fun RadioScreen(
             ComposeCard(
                 compose, radio.running, onDraftChange, onProfileChange, onSendText, onPickImage,
                 onImagePreset, onClearImage, onSendImage, heard, quickMessages, onToChange, onQuickMessage, queueActions, fileActions,
+                voiceActions,
             )
         }
         if (queue.isNotEmpty()) item { QueueCard(queue, radio.running, queueActions.onRemove) }
@@ -118,6 +123,16 @@ fun RadioScreen(
 /** Sending a small file: pick it with the document picker, then send it now or queue it. */
 class FileActions(
     val onPick: () -> Unit,
+    val onClear: () -> Unit,
+    val onSend: () -> Unit,
+    val onQueue: () -> Unit,
+)
+
+/** Recording a voice note, then playing, sending or queueing it. */
+class VoiceActions(
+    val onRecord: () -> Unit,
+    val onStop: () -> Unit,
+    val onPlay: () -> Unit,
     val onClear: () -> Unit,
     val onSend: () -> Unit,
     val onQueue: () -> Unit,
@@ -311,6 +326,7 @@ private fun ComposeCard(
     onQuickMessage: (String) -> Unit,
     queueActions: QueueActions,
     fileActions: FileActions,
+    voiceActions: VoiceActions,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -347,6 +363,14 @@ private fun ComposeCard(
                 FileDraft(file, compose.sending, running, fileActions)
                 return@Column
             }
+            if (compose.recording.active) {
+                Recording(compose.recording, voiceActions)
+                return@Column
+            }
+            compose.voice?.let {
+                VoiceDraft(it, compose.sending, running, voiceActions)
+                return@Column
+            }
             if (image == null && quickMessages.isNotEmpty()) {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     quickMessages.forEach { q ->
@@ -368,7 +392,7 @@ private fun ComposeCard(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onPickImage) {
                         Icon(Icons.Filled.Add, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
@@ -379,6 +403,15 @@ private fun ComposeCard(
                         Spacer(Modifier.width(6.dp))
                         Text(tr("File"))
                     }
+                    if (compose.voiceAvailable) {
+                        OutlinedButton(onClick = voiceActions.onRecord) {
+                            Icon(Icons.Filled.Add, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(tr("Voice"))
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.weight(1f))
                     OutlinedButton(onClick = queueActions.onQueueText, enabled = compose.draft.isNotBlank()) { Text(tr("Queue")) }
                     Button(onClick = onSendText, enabled = running && compose.draft.isNotBlank() && !compose.sending) {
@@ -392,6 +425,42 @@ private fun ComposeCard(
             }
         }
     }
+}
+
+@Composable
+private fun Recording(recording: RecordingUi, actions: VoiceActions) {
+    Text(
+        tr("Recording... %d s", recording.elapsedMs / 1000),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.error,
+    )
+    LinearProgressIndicator(
+        progress = { (recording.elapsedMs / 30_000f).coerceIn(0f, 1f) },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Button(onClick = actions.onStop, modifier = Modifier.fillMaxWidth()) { Text(tr("Stop recording")) }
+}
+
+@Composable
+private fun VoiceDraft(voice: VoiceDraftUi, sending: Boolean, running: Boolean, actions: VoiceActions) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = actions.onPlay) { Icon(Icons.Filled.PlayArrow, contentDescription = tr("Play")) }
+        Text(
+            tr(
+                "Voice note · %d s · %s · about %s on air",
+                (voice.durationMs + 500) / 1000, Presenters.formatBytes(voice.estimate.wireBytes), Presenters.formatDuration(voice.estimate.airtimeMs),
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = actions.onClear) { Icon(Icons.Filled.Close, contentDescription = tr("Remove voice note")) }
+    }
+    Button(onClick = actions.onSend, enabled = running && !sending, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
+        Spacer(Modifier.width(6.dp))
+        Text(tr("Send voice note"))
+    }
+    OutlinedButton(onClick = actions.onQueue, modifier = Modifier.fillMaxWidth()) { Text(tr("Add voice note to queue")) }
 }
 
 @Composable

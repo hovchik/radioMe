@@ -2,6 +2,7 @@ package com.radiome.feature.transceiver.share
 
 import com.radiome.core.protocol.link.Direction
 import com.radiome.core.protocol.payload.ContentType
+import com.radiome.core.protocol.payload.VoiceNote
 import com.radiome.data.TransferRecord
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -37,6 +38,8 @@ object HistoryExport {
         r.contentType?.isImage == true -> "Image${name(r)}, ${size(r)}"
         r.contentType == ContentType.POSITION -> "Position"
         r.contentType == ContentType.BINARY -> "File${name(r)}, ${size(r)}"
+        r.contentType == ContentType.VOICE ->
+            "Voice note, ${((r.payload?.let { VoiceNote.decode(it) }?.durationMs() ?: 0L) + 500) / 1000} s, ${size(r)}"
         else -> "(nothing readable)"
     }
 

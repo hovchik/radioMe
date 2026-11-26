@@ -20,6 +20,8 @@ import com.radiome.core.protocol.payload.ContentType
 import com.radiome.core.protocol.payload.Files
 import com.radiome.core.protocol.session.SessionHeader
 import com.radiome.feature.transceiver.share.HistoryExport
+import com.radiome.feature.transceiver.voice.VoiceNotes
+import com.radiome.core.protocol.payload.VoiceNote
 import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.AirtimeEstimator
 import com.radiome.data.TransferRecord
@@ -63,6 +65,7 @@ class TransceiverViewModel @Inject constructor(
     private val positionHistory: PositionHistory,
     private val keys: GroupKeyProvider,
     private val beacon: PositionBeacon,
+    private val voice: VoiceNotes,
 ) : ViewModel() {
     /** Where image work (resize, WebP encode) runs. Tests replace it. */
     internal var workDispatcher: CoroutineDispatcher = Dispatchers.Default
@@ -375,7 +378,7 @@ class TransceiverViewModel @Inject constructor(
 
     // ------------------------------------------------------------------------------------------ compose
 
-    private val _compose = MutableStateFlow(ComposeUi(profile = settings.value.defaultProfile))
+    private val _compose = MutableStateFlow(ComposeUi(profile = settings.value.defaultProfile, voiceAvailable = voice.available))
     val compose: StateFlow<ComposeUi> = _compose.asStateFlow()
 
     private var sourceImage: RasterImage? = null
@@ -415,6 +418,9 @@ class TransceiverViewModel @Inject constructor(
             viewModelScope.launch { settingsRepository.update { it.copy(adaptiveSpeed = false) } }
         }
         _compose.update { it.copy(profile = profile, auto = it.auto && keepAuto, textEstimate = estimate(it.draft, profile)) }
+        voiceNote?.let { n ->
+            _compose.update { it.copy(voice = it.voice?.copy(estimate = Presenters.bytesEstimate(n.encode(), voiceOptions(it), airtime))) }
+        }
         if (sourceImage != null) prepareImage()
     }
 
@@ -440,6 +446,7 @@ class TransceiverViewModel @Inject constructor(
     /** [uri] is the content:// URI the photo picker returned. */
     fun onImagePicked(uri: String) {
         clearFile()
+        clearVoice()
         loadJob?.cancel()
         encodeJob?.cancel()
         sourceImage = null
@@ -513,6 +520,7 @@ class TransceiverViewModel @Inject constructor(
             return
         }
         clearImage()
+        clearVoice()
         val options = fileOptions(_compose.value)
         val fitted = Files.fitName(name, options.chunkPayloadSize - SessionHeader.FIXED_SIZE)
         fileBytes = bytes
@@ -571,6 +579,114 @@ class TransceiverViewModel @Inject constructor(
         if (!encryptionReady()) return
         enqueue("${payload.name}, ${Presenters.formatBytes(payload.bytes.size)}", payload, fileOptions(c), c.auto)
         clearFile()
+    }
+
+    // ------------------------------------------------------------------------------------------ voice notes
+
+    private var voiceNote: VoiceNote? = null
+    private var recordJob: Job? = null
+
+    /** Starts the microphone. The UI asks for the permission first. */
+    fun startVoiceRecording() {
+        if (_compose.value.recording.active) return
+        if (!voice.available) {
+            _messages.trySend(tr("Voice notes are not available on this phone."))
+            return
+        }
+        if (!voice.startRecording()) {
+            _messages.trySend(tr("Allow the microphone to record a voice note."))
+            return
+        }
+        clearImage()
+        clearFile()
+        clearVoice()
+        _compose.update { it.copy(recording = RecordingUi(active = true)) }
+        recordJob = viewModelScope.launch {
+            while (voice.isRecording) {
+                _compose.update { it.copy(recording = RecordingUi(active = true, elapsedMs = voice.elapsedMs)) }
+                delay(RECORD_TICK_MS)
+            }
+            // The recorder stopped by itself at its time limit.
+            if (_compose.value.recording.active) finishRecording()
+        }
+    }
+
+    fun stopVoiceRecording() {
+        if (!_compose.value.recording.active) return
+        recordJob?.cancel()
+        recordJob = null
+        viewModelScope.launch { finishRecording() }
+    }
+
+    private suspend fun finishRecording() {
+        val note = voice.stopRecording()
+        _compose.update { it.copy(recording = RecordingUi()) }
+        if (note == null || note.frames.isEmpty()) {
+            _messages.trySend(tr("Too short. Tap the button, speak, then tap it again."))
+            return
+        }
+        voiceNote = note
+        _compose.update { it.copy(voice = VoiceDraftUi(note.durationMs(), Presenters.bytesEstimate(note.encode(), voiceOptions(it), airtime))) }
+    }
+
+    /** Codec2 frames do not compress, so deflate is skipped. */
+    private fun voiceOptions(c: ComposeUi) = settings.value.transferOptions(c.profile, c.to).copy(compression = CompressionMode.NEVER)
+
+    fun clearVoice() {
+        voiceNote = null
+        voice.stopPlayback()
+        _compose.update { it.copy(voice = null) }
+    }
+
+    fun sendVoice() {
+        val note = voiceNote ?: return
+        val c = _compose.value
+        if (c.sending || !encryptionReady()) return
+        viewModelScope.launch {
+            _compose.update { it.copy(sending = true) }
+            warnIfMuted()
+            val sid = dispatch(note.toPayload(), voiceOptions(c))
+            _compose.update { it.copy(sending = false) }
+            if (sid == null) _messages.trySend(tr("Turn the radio on first.")) else clearVoice()
+        }
+    }
+
+    fun queueVoice() {
+        val note = voiceNote ?: return
+        val c = _compose.value
+        if (!encryptionReady()) return
+        enqueue(tr("Voice note %d s", seconds(note.durationMs())), note.toPayload(), voiceOptions(c), c.auto)
+        clearVoice()
+    }
+
+    /** Plays the recorded draft. */
+    fun playVoiceDraft() {
+        val note = voiceNote ?: return
+        viewModelScope.launch { voice.play(note) }
+    }
+
+    /** Plays a voice note from the history (sent or received). */
+    fun playVoice(bytes: ByteArray) {
+        val note = VoiceNote.decode(bytes)
+        if (note == null) {
+            _messages.trySend(tr("That voice note could not be read."))
+            return
+        }
+        if (!voice.available) {
+            _messages.trySend(tr("Voice notes are not available on this phone."))
+            return
+        }
+        viewModelScope.launch { voice.play(note) }
+    }
+
+    fun stopVoicePlayback() = voice.stopPlayback()
+
+    private fun seconds(ms: Long) = (ms + 500) / 1000
+
+    override fun onCleared() {
+        recordJob?.cancel()
+        voice.stopPlayback()
+        voice.cancelRecording()
     }
 
     fun clearImage() {
@@ -636,6 +752,7 @@ class TransceiverViewModel @Inject constructor(
 
     private companion object {
         const val TICK_MS = 2_000L
+        const val RECORD_TICK_MS = 250L
         const val QUEUE_ITEM_TIMEOUT_MS = 30 * 60_000L
         const val MUTED = "Media volume is muted, so the radio will hear nothing. Turn it up to about 70%."
     }

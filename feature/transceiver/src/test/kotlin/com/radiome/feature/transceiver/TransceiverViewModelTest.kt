@@ -48,6 +48,7 @@ class TransceiverViewModelTest {
     private val keys = FakeKeys()
     private val location = FakeLocation()
     private lateinit var beacon: PositionBeacon
+    private val voice = FakeVoice()
 
     @Before
     fun setUp() {
@@ -56,7 +57,7 @@ class TransceiverViewModelTest {
         val file = tmp.newFolder().resolve("s.preferences_pb")
         settings = SettingsRepository(PreferenceDataStoreFactory.create(scope = scope, produceFile = { file }), scope)
         beacon = PositionBeacon(client, settings, keys, location, scope)
-        vm = TransceiverViewModel(client, FakeHistory(), settings, codec, FakePositions(), keys, beacon)
+        vm = TransceiverViewModel(client, FakeHistory(), settings, codec, FakePositions(), keys, beacon, voice)
             .apply { workDispatcher = Dispatchers.Unconfined }
     }
 
@@ -385,5 +386,42 @@ class TransceiverViewModelTest {
         client.events.tryEmit(LinkEvent.Delivered(client.nextSid - 1, by = "EK1A"))
         waitUntil { buzzes.get() == 1 }
         job.cancel()
+    }
+
+    @Test
+    fun recordedVoiceNoteIsSentUncompressedAndCanBePlayedBack() = runBlocking {
+        vm.startVoiceRecording()
+        assertTrue(vm.compose.value.recording.active)
+        vm.stopVoiceRecording()
+        waitUntil { vm.compose.value.voice != null }
+        assertFalse(vm.compose.value.recording.active)
+        val draft = vm.compose.value.voice!!
+        assertEquals(10_000L, draft.durationMs) // 250 frames of 40 ms
+        assertEquals(com.radiome.core.protocol.payload.VoiceNote.HEADER + 875, draft.estimate.bytes)
+
+        vm.playVoiceDraft()
+        waitUntil { voice.played.size == 1 }
+
+        vm.startListening()
+        vm.sendVoice()
+        waitUntil { client.sent.size == 1 }
+        val (payload, options) = client.sent.single()
+        assertEquals(ContentType.VOICE, payload.type)
+        assertEquals(CompressionMode.NEVER, options.compression)
+        assertEquals(250, com.radiome.core.protocol.payload.VoiceNote.decode(payload.bytes)!!.frames.size)
+        waitUntil { vm.compose.value.voice == null }
+
+        vm.playVoice(payload.bytes)
+        waitUntil { voice.played.size == 2 }
+    }
+
+    @Test
+    fun tooShortVoiceNoteIsDropped() = runBlocking {
+        voice.frames = 0
+        vm.startVoiceRecording()
+        vm.stopVoiceRecording()
+        assertTrue(withTimeout(2_000) { vm.messages.first() }.startsWith("Too short"))
+        assertNull(vm.compose.value.voice)
+        assertFalse(vm.compose.value.recording.active)
     }
 }

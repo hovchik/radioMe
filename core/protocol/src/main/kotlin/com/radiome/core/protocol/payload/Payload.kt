@@ -13,6 +13,8 @@ enum class ContentType(val code: Int) {
     ENCRYPTED(5),
     /** GPS fix ([Position]); only ever sent encrypted. */
     POSITION(6),
+    /** Codec2 voice note ([VoiceNote]). */
+    VOICE(7),
     ;
 
     val isImage: Boolean get() = this == IMAGE_WEBP || this == IMAGE_PROGRESSIVE

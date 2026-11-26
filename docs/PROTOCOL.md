@@ -133,7 +133,7 @@ HEADER frame payload:
 | Offset | Size | Field                                              |
 |--------|------|----------------------------------------------------|
 | 0      | 1    | Header version (= 1)                               |
-| 1      | 1    | Content type: TEXT = 1, IMAGE_WEBP = 2, BINARY = 3, IMAGE_PROGRESSIVE = 4, ENCRYPTED = 5, POSITION = 6 |
+| 1      | 1    | Content type: TEXT = 1, IMAGE_WEBP = 2, BINARY = 3, IMAGE_PROGRESSIVE = 4, ENCRYPTED = 5, POSITION = 6, VOICE = 7 |
 | 2      | 1    | Flags: bit 0 = raw DEFLATE                         |
 | 3      | 4    | Wire length (bytes carried by DATA chunks)         |
 | 7      | 4    | Original length                                    |
@@ -294,3 +294,23 @@ The app keeps an `AdaptiveRate` per link. After each outgoing transfer:
 
 A link test's suggestion resets the starting point. Queued messages marked Auto take the current profile when they
 go on air, one at a time.
+
+## 13. Voice notes (VOICE = 7)
+
+Recorded speech is encoded with [Codec2](https://github.com/drowe67/codec2) (LGPL 2.1, vendored in
+`core/voice/src/main/cpp/codec2`, built as its own shared library) and sent like any other payload, with
+compression off because Codec2 frames do not deflate.
+
+```
+offset size field
+  0     1   version (= 1)
+  1     1   Codec2 mode (8 = 700C; 5 = 1200, 4 = 1300, 0 = 3200 are reserved for later)
+  2     1   bits per frame (28 for 700C)
+  3     2   frame count, u16 big-endian
+  5     ... frames back to back, each <bits per frame> bits, MSB first; the last byte is zero padded
+```
+
+The app records 8 kHz mono from the phone's own microphone (not the radio cable) for up to 30 s and uses 700C:
+40 ms frames of 28 bits, so 10 s of speech is 875 bytes plus the 5-byte header. That is about 36 s on air on
+Standard and 17 s on Fast. Playback uses the phone's speaker so a note is never fed into the radio's VOX.
+A voice note can be sealed with the group key like any other message (section 11).

@@ -98,6 +98,12 @@ data class FileDraftUi(val name: String, val sizeBytes: Int, val estimate: Compo
     val large: Boolean get() = sizeBytes > com.radiome.core.protocol.payload.Files.WARN_BYTES
 }
 
+/** A recorded voice note waiting to be sent. */
+data class VoiceDraftUi(val durationMs: Long, val estimate: ComposeEstimate)
+
+/** The microphone: recording now, and for how long. */
+data class RecordingUi(val active: Boolean = false, val elapsedMs: Long = 0)
+
 data class ImageDraftUi(
     val bytes: ByteArray? = null,
     val width: Int = 0,
@@ -154,6 +160,10 @@ data class ComposeUi(
     val image: ImageDraftUi? = null,
     /** A small file picked to send (PDF, GPX, contact card...). */
     val file: FileDraftUi? = null,
+    val voice: VoiceDraftUi? = null,
+    val recording: RecordingUi = RecordingUi(),
+    /** False when Codec2 is missing on this phone; the voice button is then hidden. */
+    val voiceAvailable: Boolean = false,
     val sending: Boolean = false,
 )
 
@@ -263,6 +273,10 @@ object Presenters {
                 ContentType.IMAGE_WEBP, ContentType.IMAGE_PROGRESSIVE -> tr("Image received%s (%d bytes)", from, e.payload.bytes.size)
                 ContentType.BINARY -> tr("File received%s (%d bytes)", from, e.payload.bytes.size)
                 ContentType.POSITION -> if (e.encrypted) tr("Position received%s", from) else null
+                ContentType.VOICE -> tr(
+                    "Voice note received%s (%d s)", from,
+                    ((com.radiome.core.protocol.payload.VoiceNote.decode(e.payload.bytes)?.durationMs() ?: 0L) + 500) / 1000,
+                )
                 ContentType.ENCRYPTED -> tr("Encrypted message%s could not be opened: %s", from, e.unreadable ?: "unknown reason")
             }
         }
