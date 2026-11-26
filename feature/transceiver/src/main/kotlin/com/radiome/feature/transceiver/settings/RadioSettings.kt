@@ -1,0 +1,83 @@
+package com.radiome.feature.transceiver.settings
+
+import com.radiome.core.audio.AudioEngineConfig
+import com.radiome.core.audio.RoutePreference
+import com.radiome.core.dsp.modem.ModemConfig
+import com.radiome.core.dsp.modem.ModemProfile
+import com.radiome.core.protocol.arq.ArqConfig
+import com.radiome.core.protocol.image.ImagePreset
+import com.radiome.core.protocol.image.MaxEdge
+import com.radiome.core.protocol.session.TransferOptions
+
+/** Everything the user can change, as stored. [sanitized] clamps values read from disk into their legal ranges. */
+data class RadioSettings(
+    /** VOX / squelch opening pilot before each burst. */
+    val leadInMs: Int = ModemConfig.DEFAULT_LEAD_IN_MS,
+    val defaultProfile: ModemProfile = ModemProfile.STANDARD,
+    /** Reed-Solomon parity as % of data bytes, 20..50. Null uses the profile's default. */
+    val parityPercent: Int? = null,
+    /** Codewords per interleave block, 1..16. Null uses the profile's default. */
+    val interleaveDepth: Int? = null,
+    /** Payload bytes per chunk (P), 32..64. */
+    val chunkPayloadSize: Int = 48,
+    val autoNack: Boolean = true,
+    val sendAck: Boolean = true,
+    val stepDownToRobust: Boolean = true,
+    /** Quiet time before the receiver answers (radio turnaround). */
+    val turnaroundMs: Int = 2000,
+    val routePreference: RoutePreference = RoutePreference.AUTO,
+    /** Digital gain on transmitted audio, 10..100 %. */
+    val outputGainPercent: Int = 100,
+    val imageMaxEdge: MaxEdge = MaxEdge.PX_240,
+    val imageQuality: Int = 25,
+    val imageGrayscale: Boolean = false,
+) {
+    fun sanitized(): RadioSettings = copy(
+        leadInMs = leadInMs.coerceIn(ModemConfig.MIN_LEAD_IN_MS, ModemConfig.MAX_LEAD_IN_MS),
+        parityPercent = parityPercent?.coerceIn(MIN_PARITY, MAX_PARITY),
+        interleaveDepth = interleaveDepth?.coerceIn(1, MAX_INTERLEAVE),
+        chunkPayloadSize = chunkPayloadSize.coerceIn(TransferOptions.MIN_CHUNK, TransferOptions.MAX_CHUNK),
+        turnaroundMs = turnaroundMs.coerceIn(MIN_TURNAROUND, MAX_TURNAROUND),
+        outputGainPercent = outputGainPercent.coerceIn(MIN_GAIN, 100),
+        imageQuality = imageQuality.coerceIn(ImagePreset.MIN_QUALITY, ImagePreset.MAX_QUALITY),
+    )
+
+    fun modemConfig(): ModemConfig = ModemConfig(leadInMs = sanitized().leadInMs)
+
+    fun arqConfig(): ArqConfig = sanitized().let {
+        ArqConfig(
+            autoNack = it.autoNack,
+            turnaroundMs = it.turnaroundMs,
+            stepDownToRobust = it.stepDownToRobust,
+            sendAck = it.sendAck,
+        )
+    }
+
+    fun audioConfig(): AudioEngineConfig = AudioEngineConfig(outputGain = outputGain)
+
+    val outputGain: Float get() = sanitized().outputGainPercent / 100f
+
+    fun transferOptions(profile: ModemProfile = defaultProfile): TransferOptions = sanitized().let {
+        TransferOptions(
+            profile = profile,
+            chunkPayloadSize = it.chunkPayloadSize,
+            parityRatio = it.parityPercent?.let { p -> p / 100.0 },
+            interleaveDepth = it.interleaveDepth,
+        )
+    }
+
+    fun imagePreset(): ImagePreset = sanitized().let { ImagePreset(it.imageMaxEdge, it.imageQuality, it.imageGrayscale) }
+
+    /** True when switching from [old] to this needs the link restarted (lead-in, ARQ timing, audio engine). */
+    fun needsLinkRestart(old: RadioSettings): Boolean =
+        modemConfig() != old.modemConfig() || arqConfig() != old.arqConfig()
+
+    companion object {
+        const val MIN_PARITY = 20
+        const val MAX_PARITY = 50
+        const val MAX_INTERLEAVE = 16
+        const val MIN_TURNAROUND = 500
+        const val MAX_TURNAROUND = 5000
+        const val MIN_GAIN = 10
+    }
+}

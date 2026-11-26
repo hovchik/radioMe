@@ -1,0 +1,203 @@
+package com.radiome.feature.transceiver
+
+import com.radiome.core.dsp.modem.DemodTelemetry
+import com.radiome.core.dsp.modem.ModemProfile
+import com.radiome.core.dsp.modem.RxState
+import com.radiome.core.protocol.arq.ReceiverPhase
+import com.radiome.core.protocol.arq.SenderPhase
+import com.radiome.core.protocol.image.ImagePreset
+import com.radiome.core.protocol.link.Direction
+import com.radiome.core.protocol.link.LinkEvent
+import com.radiome.core.protocol.link.LinkState
+import com.radiome.core.protocol.link.TransferTelemetry
+import com.radiome.core.protocol.payload.CompressionMode
+import com.radiome.core.protocol.payload.ContentType
+import com.radiome.core.protocol.payload.Deflate
+import com.radiome.core.protocol.session.AirtimeEstimator
+import com.radiome.core.protocol.session.ChunkState
+import com.radiome.core.protocol.session.TransferOptions
+import com.radiome.core.audio.VolumeAdvice
+import com.radiome.feature.transceiver.link.RouteInfo
+import kotlin.math.roundToInt
+
+// Plain models and the pure functions that build them, kept free of Android so they are unit tested on the JVM.
+
+enum class InputLevel { SILENT, LOW, GOOD, HOT }
+
+/** Receive dashboard. */
+data class RadioUi(
+    val running: Boolean = false,
+    val linkState: LinkState = LinkState.LISTENING,
+    val route: RouteInfo? = null,
+    val levelDbfs: Double = Double.NEGATIVE_INFINITY,
+    val inputLevel: InputLevel = InputLevel.SILENT,
+    val snrDb: Double = Double.NaN,
+    val rxState: RxState = RxState.LISTENING,
+    val syncCorrelation: Double = 0.0,
+    val burstProgress: Float = 0f,
+    val erasedSymbols: Int = 0,
+    val volumeAdvice: VolumeAdvice? = null,
+    val transfers: List<TransferCard> = emptyList(),
+)
+
+data class TransferCard(
+    val sessionId: Int,
+    val direction: Direction,
+    val phase: String,
+    val name: String,
+    val totalChunks: Int,
+    val receivedChunks: Int,
+    val fecRepairedChunks: Int,
+    val fecCorrectedBytes: Int,
+    val missing: List<Int>,
+    val lossPercent: Double,
+    val repairRounds: Int,
+    val snrDb: Double,
+    val chunkStates: List<ChunkState>,
+    val elapsedMs: Long,
+    val startedAtMs: Long,
+    val updatedAtMs: Long,
+    val canRequestCorrections: Boolean,
+    val canCancel: Boolean,
+    val finished: Boolean,
+) {
+    val progress: Float get() = if (totalChunks <= 0) 0f else receivedChunks.toFloat() / totalChunks
+    val sessionLabel: String get() = "%04X".format(sessionId)
+}
+
+data class ComposeEstimate(val bytes: Int, val wireBytes: Int, val chunks: Int, val airtimeMs: Long, val compressed: Boolean)
+
+data class ImageDraftUi(
+    val bytes: ByteArray? = null,
+    val width: Int = 0,
+    val height: Int = 0,
+    val sizeBytes: Int = 0,
+    val airtimeMs: Long = 0,
+    val preset: ImagePreset = ImagePreset(),
+    val busy: Boolean = false,
+    val error: String? = null,
+) {
+    override fun equals(other: Any?): Boolean = other is ImageDraftUi && width == other.width && height == other.height &&
+        sizeBytes == other.sizeBytes && airtimeMs == other.airtimeMs && preset == other.preset && busy == other.busy &&
+        error == other.error && bytes.contentEquals(other.bytes)
+
+    override fun hashCode(): Int = (bytes?.contentHashCode() ?: 0) * 31 + preset.hashCode()
+}
+
+data class ComposeUi(
+    val draft: String = "",
+    val profile: ModemProfile = ModemProfile.STANDARD,
+    val textEstimate: ComposeEstimate? = null,
+    val image: ImageDraftUi? = null,
+    val sending: Boolean = false,
+)
+
+object Presenters {
+    /** Transfers that ended are kept on the dashboard this long (wall clock). */
+    const val FINISHED_VISIBLE_MS = 60_000L
+
+    private val finishedPhases = setOf(
+        ReceiverPhase.COMPLETE.name, ReceiverPhase.CORRUPT.name,
+        SenderPhase.COMPLETE.name, SenderPhase.FAILED.name, SenderPhase.CANCELLED.name,
+    )
+
+    fun inputLevel(dbfs: Double): InputLevel = when {
+        dbfs.isNaN() || dbfs < -60 -> InputLevel.SILENT
+        dbfs < -40 -> InputLevel.LOW
+        dbfs > -3 -> InputLevel.HOT
+        else -> InputLevel.GOOD
+    }
+
+    /** dBFS mapped onto 0..1 over -60..0 dB for the level bar. */
+    fun levelFraction(dbfs: Double): Float =
+        if (dbfs.isNaN() || dbfs == Double.NEGATIVE_INFINITY) 0f else ((dbfs + 60) / 60).toFloat().coerceIn(0f, 1f)
+
+    fun radio(
+        running: Boolean,
+        state: LinkState,
+        route: RouteInfo?,
+        rx: DemodTelemetry,
+        transfers: Map<Int, TransferTelemetry>,
+        volume: VolumeAdvice?,
+        hidden: Set<Int>,
+    ) = RadioUi(
+        running = running,
+        linkState = state,
+        route = route,
+        levelDbfs = rx.levelDbfs,
+        inputLevel = inputLevel(rx.levelDbfs),
+        snrDb = rx.snrDb,
+        rxState = rx.state,
+        syncCorrelation = rx.syncCorrelation,
+        burstProgress = if (rx.symbolsTotal > 0) rx.symbolsDone.toFloat() / rx.symbolsTotal else 0f,
+        erasedSymbols = rx.erasedSymbols,
+        volumeAdvice = volume,
+        transfers = cards(transfers.values, hidden),
+    )
+
+    /** Dashboard cards: running transfers first, newest first. [hidden] are finished ones the dashboard dropped. */
+    fun cards(transfers: Collection<TransferTelemetry>, hidden: Set<Int>): List<TransferCard> = transfers
+        .filter { it.sessionId !in hidden }
+        .map { card(it) }
+        .sortedWith(compareBy<TransferCard> { it.finished }.thenByDescending { it.startedAtMs })
+
+    fun isFinished(t: TransferTelemetry): Boolean = t.phase in finishedPhases
+
+    fun card(t: TransferTelemetry): TransferCard {
+        val finished = t.phase in finishedPhases
+        return TransferCard(
+            sessionId = t.sessionId,
+            direction = t.direction,
+            phase = t.phase,
+            name = t.name,
+            totalChunks = t.totalChunks,
+            receivedChunks = t.receivedChunks,
+            fecRepairedChunks = t.fecRepairedChunks,
+            fecCorrectedBytes = t.fecCorrectedBytes,
+            missing = t.missing,
+            lossPercent = t.lossPercent,
+            repairRounds = t.repairRounds,
+            snrDb = t.snrDb,
+            chunkStates = t.chunkStates,
+            // Link times run on the audio clock, so measure from the first to the latest activity.
+            elapsedMs = t.updatedAtMs - t.startedAtMs,
+            startedAtMs = t.startedAtMs,
+            updatedAtMs = t.updatedAtMs,
+            canRequestCorrections = t.direction == Direction.INCOMING && t.phase == ReceiverPhase.AWAITING_REPAIR.name && t.missing.isNotEmpty(),
+            canCancel = t.direction == Direction.OUTGOING && (t.phase == SenderPhase.TRANSMITTING.name || t.phase == SenderPhase.AWAITING_RESPONSE.name),
+            finished = finished,
+        )
+    }
+
+    /** Size and air time of a text message as it will go out (DEFLATE applied only when it helps). */
+    fun textEstimate(text: String, options: TransferOptions, airtime: AirtimeEstimator): ComposeEstimate? {
+        if (text.isEmpty()) return null
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        val deflated = if (options.compression == CompressionMode.AUTO) Deflate.compress(bytes) else null
+        val compressed = deflated != null && deflated.size < bytes.size
+        val wire = if (compressed) deflated!!.size else bytes.size
+        val chunks = maxOf(1, (wire + options.chunkPayloadSize - 1) / options.chunkPayloadSize)
+        return ComposeEstimate(bytes.size, wire, chunks, airtime.payloadMs(wire, options), compressed)
+    }
+
+    /** One-line notice for the snackbar, or null for events the dashboard already shows. */
+    fun eventMessage(e: LinkEvent, autoNack: Boolean): String? = when (e) {
+        is LinkEvent.MessageReceived -> when (e.payload.type) {
+            ContentType.TEXT -> "Message received: " + e.payload.asText().take(60)
+            ContentType.IMAGE_WEBP -> "Image received (${e.payload.bytes.size} bytes)"
+            ContentType.BINARY -> "File received (${e.payload.bytes.size} bytes)"
+        }
+        is LinkEvent.Delivered -> "Delivered: the other station confirmed transfer %04X".format(e.sessionId)
+        is LinkEvent.Failed -> "Transfer %04X failed: %s".format(e.sessionId, e.reason)
+        is LinkEvent.CorrectionsNeeded -> if (autoNack) null else
+            "${e.missing.size} chunks missing from %04X. Send a correction request when the channel is clear.".format(e.sessionId)
+        else -> null
+    }
+
+    fun formatDuration(ms: Long): String {
+        val s = (ms / 1000.0)
+        return if (s < 60) "%.1f s".format(s) else "%d min %02d s".format((s / 60).toInt(), (s % 60).roundToInt().coerceAtMost(59))
+    }
+
+    fun formatBytes(n: Int): String = if (n < 1024) "$n B" else "%.1f KB".format(n / 1024.0)
+}
