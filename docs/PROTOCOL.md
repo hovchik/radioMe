@@ -122,3 +122,47 @@ Plus about 1.24 s fixed per burst (600 ms lead-in, chirp, header, tail).
 | FAST     | 0 lost     | 2/200 lost  | all lost    |
 
 SNR is measured in a 2500 Hz bandwidth.
+
+## 8. Session layer (`core:protocol`)
+
+A transfer is one HEADER frame (ChunkIndex `0xFFFF`) plus `TotalChunks` DATA frames, all with the same SessionId.
+
+HEADER frame payload:
+
+| Offset | Size | Field                                              |
+|--------|------|----------------------------------------------------|
+| 0      | 1    | Header version (= 1)                               |
+| 1      | 1    | Content type: TEXT = 1, IMAGE_WEBP = 2, BINARY = 3 |
+| 2      | 1    | Flags: bit 0 = raw DEFLATE                         |
+| 3      | 4    | Wire length (bytes carried by DATA chunks)         |
+| 7      | 4    | Original length                                    |
+| 11     | 4    | CRC-32 of the original bytes                       |
+| 15     | 1    | Chunk payload size P (32..64)                      |
+| 16     | 1    | Name length                                        |
+| 17     | n    | Name, UTF-8, truncated to fit the frame            |
+
+Text and binary payloads are DEFLATE-compressed only when that makes them smaller. Images are resized
+(128 / 240 / 320 px long edge, area averaging), optionally converted to grayscale, and encoded as lossy WebP at
+10-40% quality. The compose screen gets the exact byte size and air time before sending.
+
+### Half-duplex ARQ
+
+```
+Sender                                   Receiver
+  | HEADER + DATA bursts (chosen profile)  |
+  |--------------------------------------->|  tracks OK / FEC-repaired / missing per chunk
+  |      ... turnaround (2 s of quiet) ... |
+  |<---------------------------------------|  NACK (ROBUST): missing chunk list or bitmap,
+  |                                        |  0xFFFF if the HEADER frame was lost
+  | only the requested chunks (ROBUST)     |
+  |--------------------------------------->|  merged into the stored partial session
+  |<---------------------------------------|  ACK (ROBUST) once complete and CRC-32 verified
+```
+
+* Auto NACK is the default. With it off, the receiver reports "corrections needed" and waits for the user.
+* If the sender hears nothing for 6 s of quiet, it re-sends only its HEADER frame as a poll (up to 2 times).
+  A receiver that already has the session answers the poll with a NACK, or with an ACK if it is already complete.
+* A sender serves at most 5 repair rounds.
+* All timers run on the audio clock (input samples), so the behaviour matches between devices and in tests.
+* Half-duplex guard: captured audio is dropped while transmitting, the demodulator is reset afterwards, and a
+  queued burst waits until the channel is quiet (listen before talk).
