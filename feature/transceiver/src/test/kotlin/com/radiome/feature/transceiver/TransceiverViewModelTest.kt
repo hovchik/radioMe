@@ -158,6 +158,8 @@ class TransceiverViewModelTest {
         client.startListening()
         vm.updateSettings { it.copy(callsign = "ek1a") }
         waitUntil { client.lastCallsign == "EK1A" }
+        // The settings state follows the store a moment later; sends read it.
+        waitUntil { vm.settings.value.callsign == "EK1A" }
         vm.onToChange("ek2b")
         vm.sendQuickMessage("Need help")
         waitUntil { client.sent.size == 1 }
