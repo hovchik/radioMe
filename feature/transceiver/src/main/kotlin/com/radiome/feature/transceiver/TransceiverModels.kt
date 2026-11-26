@@ -1,5 +1,7 @@
 package com.radiome.feature.transceiver
 
+import com.radiome.feature.transceiver.i18n.tr
+
 import com.radiome.core.dsp.modem.DemodTelemetry
 import com.radiome.core.dsp.modem.ModemProfile
 import com.radiome.core.dsp.modem.RxState
@@ -51,11 +53,11 @@ data class RadioUi(
     /** The one most important hint for the status card, or null. One slot, so the card never changes height. */
     val hint: String? get() = when {
         !running -> null
-        outputMuted -> "Media volume is muted, so nothing is transmitted. Turn the volume up to about 70%."
+        outputMuted -> tr("Media volume is muted, so nothing is transmitted. Turn the volume up to about 70%.")
         linkState == LinkState.TRANSMITTING -> null
-        inputLevel == InputLevel.HOT -> "Input is clipping. Turn the radio volume down or move the phone away."
-        volumeAdvice == VolumeAdvice.TOO_LOW -> "Media volume is low. Set it to about 70% so the radio's VOX opens reliably."
-        volumeAdvice == VolumeAdvice.CLIPPING_RISK -> "Media volume is near maximum and may distort. About 70% works best."
+        inputLevel == InputLevel.HOT -> tr("Input is clipping. Turn the radio volume down or move the phone away.")
+        volumeAdvice == VolumeAdvice.TOO_LOW -> tr("Media volume is low. Set it to about 70% so the radio's VOX opens reliably.")
+        volumeAdvice == VolumeAdvice.CLIPPING_RISK -> tr("Media volume is near maximum and may distort. About 70% works best.")
         else -> null
     }
 }
@@ -255,19 +257,19 @@ object Presenters {
     /** One-line notice for the snackbar, or null for events the dashboard already shows. */
     fun eventMessage(e: LinkEvent, autoNack: Boolean): String? = when (e) {
         is LinkEvent.MessageReceived -> {
-            val from = e.from?.let { " from $it" } ?: ""
+            val from = e.from?.let { tr(" from %s", it) } ?: ""
             when (e.payload.type) {
-                ContentType.TEXT -> "Message$from: " + e.payload.asText().take(60)
-                ContentType.IMAGE_WEBP, ContentType.IMAGE_PROGRESSIVE -> "Image received$from (${e.payload.bytes.size} bytes)"
-                ContentType.BINARY -> "File received$from (${e.payload.bytes.size} bytes)"
-                ContentType.POSITION -> if (e.encrypted) "Position received$from" else null
-                ContentType.ENCRYPTED -> "Encrypted message$from could not be opened: ${e.unreadable ?: "unknown reason"}"
+                ContentType.TEXT -> tr("Message%s: %s", from, e.payload.asText().take(60))
+                ContentType.IMAGE_WEBP, ContentType.IMAGE_PROGRESSIVE -> tr("Image received%s (%d bytes)", from, e.payload.bytes.size)
+                ContentType.BINARY -> tr("File received%s (%d bytes)", from, e.payload.bytes.size)
+                ContentType.POSITION -> if (e.encrypted) tr("Position received%s", from) else null
+                ContentType.ENCRYPTED -> tr("Encrypted message%s could not be opened: %s", from, e.unreadable ?: "unknown reason")
             }
         }
         is LinkEvent.Delivered -> (e.by?.let { "Delivered: $it confirmed transfer %04X" } ?: "Delivered: the other station confirmed transfer %04X")
             .format(e.sessionId)
         is LinkEvent.LinkTestReported -> if (!e.measuredHere) null else
-            "Link test from ${e.peer ?: "another station"} measured; the report was sent back."
+            "Link test from ${e.peer ?: tr("another station")} measured; the report was sent back."
         is LinkEvent.LinkTestFailed -> "Link test: ${e.reason}."
         is LinkEvent.Failed -> "Transfer %04X failed: %s".format(e.sessionId, e.reason)
         // When it ended a transfer, the Failed event that follows says so.
@@ -297,10 +299,10 @@ object Presenters {
     fun formatAge(ageMs: Long): String {
         val s = (ageMs / 1000).coerceAtLeast(0)
         return when {
-            s < 60 -> "just now"
-            s < 3600 -> "${s / 60} min ago"
-            s < 86_400 -> "${s / 3600} h ago"
-            else -> "${s / 86_400} d ago"
+            s < 60 -> tr("just now")
+            s < 3600 -> tr("%d min ago", s / 60)
+            s < 86_400 -> tr("%d h ago", s / 3600)
+            else -> tr("%d d ago", s / 86_400)
         }
     }
 
@@ -308,11 +310,11 @@ object Presenters {
         "%.5f° %s, %.5f° %s".format(java.util.Locale.ROOT, kotlin.math.abs(lat), if (lat >= 0) "N" else "S", kotlin.math.abs(lon), if (lon >= 0) "E" else "W")
 
     fun beaconMessage(r: com.radiome.feature.transceiver.link.PositionBeacon.Result): String = when (r) {
-        is com.radiome.feature.transceiver.link.PositionBeacon.Result.Sent -> "Encrypted position sent: " + formatCoordinates(r.position.latitude, r.position.longitude)
-        com.radiome.feature.transceiver.link.PositionBeacon.Result.NoKey -> "Set a group key in Settings first. Positions are only ever sent encrypted."
-        com.radiome.feature.transceiver.link.PositionBeacon.Result.NoPermission -> "Allow location access to send your position."
-        com.radiome.feature.transceiver.link.PositionBeacon.Result.NoFix -> "No GPS fix yet. Check that location is on and try again outdoors."
-        com.radiome.feature.transceiver.link.PositionBeacon.Result.RadioOff -> "Turn the radio on first."
+        is com.radiome.feature.transceiver.link.PositionBeacon.Result.Sent -> tr("Encrypted position sent: %s", formatCoordinates(r.position.latitude, r.position.longitude))
+        com.radiome.feature.transceiver.link.PositionBeacon.Result.NoKey -> tr("Set a group key in Settings first. Positions are only ever sent encrypted.")
+        com.radiome.feature.transceiver.link.PositionBeacon.Result.NoPermission -> tr("Allow location access to send your position.")
+        com.radiome.feature.transceiver.link.PositionBeacon.Result.NoFix -> tr("No GPS fix yet. Check that location is on and try again outdoors.")
+        com.radiome.feature.transceiver.link.PositionBeacon.Result.RadioOff -> tr("Turn the radio on first.")
     }
 
     fun formatBytes(n: Int): String = if (n < 1024) "$n B" else "%.1f KB".format(n / 1024.0)

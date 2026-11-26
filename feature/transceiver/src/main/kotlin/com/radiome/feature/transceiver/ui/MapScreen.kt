@@ -1,5 +1,6 @@
 package com.radiome.feature.transceiver.ui
 
+import com.radiome.feature.transceiver.i18n.tr
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -80,21 +81,21 @@ fun MapScreen(
                     Icon(Icons.Filled.Lock, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (hasKey) "Positions are end-to-end encrypted · key $fingerprint" else "No group key: positions can't be sent or read",
+                        if (hasKey) tr("Positions are end-to-end encrypted · key %s", fingerprint) else tr("No group key: positions can't be sent or read"),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
                 Text(
-                    "Encrypted traffic is not allowed on amateur radio bands. Use licence-free (PMR446, FRS) or licensed private channels.",
+                    tr("Encrypted traffic is not allowed on amateur radio bands. Use licence-free (PMR446, FRS) or licensed private channels."),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = onSendPosition, enabled = hasKey) {
                         Icon(Icons.Filled.LocationOn, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Send my position")
+                        Text(tr("Send my position"))
                     }
-                    OutlinedButton(onClick = { map?.let { fit(it, positions) } }, enabled = positions.isNotEmpty()) { Text("Show all") }
+                    OutlinedButton(onClick = { map?.let { fit(it, positions) } }, enabled = positions.isNotEmpty()) { Text(tr("Show all")) }
                 }
             }
         }
@@ -119,7 +120,7 @@ fun MapScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (positions.isEmpty()) {
-                item { Text("No positions yet. Ask the group to send theirs.", style = MaterialTheme.typography.bodySmall) }
+                item { Text(tr("No positions yet. Ask the group to send theirs."), style = MaterialTheme.typography.bodySmall) }
             }
             items(positions, key = { (if (it.own) "me:" else "") + it.callsign }) { p ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -134,10 +135,10 @@ fun MapScreen(
                     }
                     OutlinedButton(onClick = {
                         map?.controller?.animateTo(GeoPoint(p.position.latitude, p.position.longitude), 15.0, 600L)
-                    }) { Text("Show") }
+                    }) { Text(tr("Show")) }
                 }
             }
-            if (positions.isNotEmpty()) item { OutlinedButton(onClick = onClear) { Text("Clear positions") } }
+            if (positions.isNotEmpty()) item { OutlinedButton(onClick = onClear) { Text(tr("Clear positions")) } }
         }
     }
 
@@ -170,7 +171,7 @@ fun MapScreen(
 }
 
 private fun label(p: StationPosition): String = when {
-    p.own -> "You" + p.callsign.takeIf { it.isNotEmpty() }?.let { " ($it)" }.orEmpty()
+    p.own -> tr("You") + p.callsign.takeIf { it.isNotEmpty() }?.let { " ($it)" }.orEmpty()
     else -> p.callsign
 }
 

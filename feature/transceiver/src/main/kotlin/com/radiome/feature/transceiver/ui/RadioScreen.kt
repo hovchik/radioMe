@@ -1,5 +1,6 @@
 package com.radiome.feature.transceiver.ui
 
+import com.radiome.feature.transceiver.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -134,10 +135,10 @@ class QueueActions(
 private fun QueueCard(queue: List<QueuedItem>, running: Boolean, onRemove: (Long) -> Unit) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Queue (${queue.size})", style = MaterialTheme.typography.titleMedium)
+            Text(tr("Queue (%d)", queue.size), style = MaterialTheme.typography.titleMedium)
             Text(
-                if (running) "Sent one after another; the next starts when the previous one is delivered or fails."
-                else "Waiting for the radio to be turned on.",
+                if (running) tr("Sent one after another; the next starts when the previous one is delivered or fails.")
+                else tr("Waiting for the radio to be turned on."),
                 style = MaterialTheme.typography.bodySmall,
             )
             queue.forEachIndexed { i, q ->
@@ -149,7 +150,7 @@ private fun QueueCard(queue: List<QueuedItem>, running: Boolean, onRemove: (Long
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    IconButton(onClick = { onRemove(q.id) }) { Icon(Icons.Filled.Close, contentDescription = "Remove from queue") }
+                    IconButton(onClick = { onRemove(q.id) }) { Icon(Icons.Filled.Close, contentDescription = tr("Remove from queue")) }
                 }
             }
         }
@@ -174,23 +175,23 @@ private fun StatusCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     val title = when {
-                        !radio.running -> "Radio off"
-                        radio.linkState == LinkState.TRANSMITTING -> "Transmitting"
-                        radio.linkState == LinkState.RECEIVING || radio.rxState != RxState.LISTENING -> "Receiving"
-                        else -> "Listening"
+                        !radio.running -> tr("Radio off")
+                        radio.linkState == LinkState.TRANSMITTING -> tr("Transmitting")
+                        radio.linkState == LinkState.RECEIVING || radio.rxState != RxState.LISTENING -> tr("Receiving")
+                        else -> tr("Listening")
                     }
                     Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1)
                     val routeText = radio.route?.let {
-                        val mode = if (it.mode == RouteMode.CABLE) "Cable" else "Acoustic"
+                        val mode = if (it.mode == RouteMode.CABLE) tr("Cable") else tr("Acoustic")
                         val out = radio.outputDevice ?: it.output
                         "$mode · in: ${it.input} · out: $out"
-                    } ?: if (radio.running) "Audio route: starting" else "Start listening to receive. Sending also needs the radio on."
+                    } ?: if (radio.running) tr("Audio route: starting") else tr("Start listening to receive. Sending also needs the radio on.")
                     OneLine(routeText)
                 }
                 if (radio.running) {
-                    OutlinedButton(onClick = onStop) { Text("Stop") }
+                    OutlinedButton(onClick = onStop) { Text(tr("Stop")) }
                 } else {
-                    Button(onClick = onStart) { Text("Start listening") }
+                    Button(onClick = onStart) { Text(tr("Start listening")) }
                 }
             }
             if (radio.running) {
@@ -207,7 +208,7 @@ private fun StatusCard(
                     when {
                         radio.linkState == LinkState.TRANSMITTING -> "Sending tones" + (radio.outputDevice?.let { " through $it" } ?: "")
                         inBurst -> "Burst %d%% · erased symbols %d".format((radio.burstProgress * 100).toInt(), radio.erasedSymbols)
-                        else -> "Waiting for a burst"
+                        else -> tr("Waiting for a burst")
                     },
                 )
                 Text(
@@ -220,16 +221,16 @@ private fun StatusCard(
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (restartPending) {
-                        Text("New lead-in or ARQ settings apply after a restart.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                        FilledTonalButton(onClick = onRestart) { Text("Restart") }
+                        Text(tr("New lead-in or ARQ settings apply after a restart."), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        FilledTonalButton(onClick = onRestart) { Text(tr("Restart")) }
                     } else {
                         Spacer(Modifier.weight(1f))
                     }
                     Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = onTestTone, enabled = radio.linkState != LinkState.TRANSMITTING) { Text("Test tone") }
+                    OutlinedButton(onClick = onTestTone, enabled = radio.linkState != LinkState.TRANSMITTING) { Text(tr("Test tone")) }
                     Spacer(Modifier.width(8.dp))
                     OutlinedButton(onClick = onLinkTest, enabled = !linkTestRunning && radio.linkState != LinkState.TRANSMITTING) {
-                        Text("Link test")
+                        Text(tr("Link test"))
                     }
                 }
             }
@@ -243,17 +244,17 @@ private fun LinkTestCard(test: LinkTestUi, onApply: () -> Unit, onDismiss: () ->
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val title = when {
-                    test.running -> "Link test running"
-                    test.measuredHere -> "Link test from ${test.peer ?: "another station"}"
-                    else -> "Link test" + (test.peer?.let { " with $it" } ?: "")
+                    test.running -> tr("Link test running")
+                    test.measuredHere -> tr("Link test from %s", test.peer ?: tr("another station"))
+                    else -> test.peer?.let { tr("Link test with %s", it) } ?: tr("Link test")
                 }
                 Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                if (!test.running) IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = "Close link test") }
+                if (!test.running) IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = tr("Close link test")) }
             }
             when {
                 test.running -> {
                     Text(
-                        "Sending probe bursts in Fast, Standard and Robust (about 25 s), then waiting for the other station's report.",
+                        tr("Sending probe bursts in Fast, Standard and Robust (about 25 s), then waiting for the other station's report."),
                         style = MaterialTheme.typography.bodySmall,
                     )
                     LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -261,7 +262,7 @@ private fun LinkTestCard(test: LinkTestUi, onApply: () -> Unit, onDismiss: () ->
                 test.error != null -> Text(test.error, color = MaterialTheme.colorScheme.error)
                 test.report != null -> {
                     for (r in test.report.results) {
-                        val snr = if (r.snrDb.isNaN()) "not heard" else "SNR %.1f dB".format(r.snrDb)
+                        val snr = if (r.snrDb.isNaN()) tr("not heard") else "SNR %.1f dB".format(r.snrDb)
                         val fec = if (r.received == 0) "" else " · FEC %.1f B/frame".format(r.errorsPerFrame)
                         Text(
                             "${profileLabel(r.profile)}: ${r.received}/${r.sent} frames · $snr$fec",
@@ -270,12 +271,12 @@ private fun LinkTestCard(test: LinkTestUi, onApply: () -> Unit, onDismiss: () ->
                         )
                     }
                     test.recommendation?.let { rec ->
-                        Text("Suggested: ${Presenters.recommendationLabel(rec)}", style = MaterialTheme.typography.titleSmall)
+                        Text(tr("Suggested: %s", Presenters.recommendationLabel(rec)), style = MaterialTheme.typography.titleSmall)
                         Text(rec.reason, style = MaterialTheme.typography.bodySmall)
                         if (test.measuredHere) {
-                            Text("This measures their transmissions to you. The report went back to them.", style = MaterialTheme.typography.bodySmall)
+                            Text(tr("This measures their transmissions to you. The report went back to them."), style = MaterialTheme.typography.bodySmall)
                         }
-                        Button(onClick = onApply) { Text("Use ${Presenters.recommendationLabel(rec)}") }
+                        Button(onClick = onApply) { Text(tr("Use %s", Presenters.recommendationLabel(rec))) }
                     }
                 }
             }
@@ -313,25 +314,25 @@ private fun ComposeCard(
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Send", style = MaterialTheme.typography.titleMedium)
+            Text(tr("Send"), style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
                 value = compose.to,
                 onValueChange = onToChange,
-                label = { Text("To (callsign)") },
-                placeholder = { Text("All stations") },
+                label = { Text(tr("To (callsign)")) },
+                placeholder = { Text(tr("All stations")) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             if (heard.isNotEmpty()) {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = compose.to.isBlank(), onClick = { onToChange("") }, label = { Text("All") })
+                    FilterChip(selected = compose.to.isBlank(), onClick = { onToChange("") }, label = { Text(tr("All")) })
                     heard.forEach { h ->
                         FilterChip(selected = compose.to == h.callsign, onClick = { onToChange(h.callsign) }, label = { Text(h.callsign) })
                     }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = compose.auto, onClick = { queueActions.onAuto(!compose.auto) }, label = { Text("Auto") })
+                FilterChip(selected = compose.auto, onClick = { queueActions.onAuto(!compose.auto) }, label = { Text(tr("Auto")) })
                 ModemProfile.entries.forEach { p ->
                     FilterChip(
                         selected = !compose.auto && compose.profile == p,
@@ -357,13 +358,13 @@ private fun ComposeCard(
                 OutlinedTextField(
                     value = compose.draft,
                     onValueChange = onDraftChange,
-                    label = { Text("Message") },
+                    label = { Text(tr("Message")) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp),
                 )
                 compose.textEstimate?.let {
                     val zip = if (it.compressed) " (compressed from ${it.bytes} B)" else ""
                     Text(
-                        "${Presenters.formatBytes(it.wireBytes)}$zip · ${it.chunks} chunks · about ${Presenters.formatDuration(it.airtimeMs)} on air",
+                        tr("%s · %d chunks · about %s on air", Presenters.formatBytes(it.wireBytes) + zip, it.chunks, Presenters.formatDuration(it.airtimeMs)),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -371,19 +372,19 @@ private fun ComposeCard(
                     OutlinedButton(onClick = onPickImage) {
                         Icon(Icons.Filled.Add, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Image")
+                        Text(tr("Image"))
                     }
                     OutlinedButton(onClick = fileActions.onPick) {
                         Icon(Icons.Filled.Add, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("File")
+                        Text(tr("File"))
                     }
                     Spacer(Modifier.weight(1f))
-                    OutlinedButton(onClick = queueActions.onQueueText, enabled = compose.draft.isNotBlank()) { Text("Queue") }
+                    OutlinedButton(onClick = queueActions.onQueueText, enabled = compose.draft.isNotBlank()) { Text(tr("Queue")) }
                     Button(onClick = onSendText, enabled = running && compose.draft.isNotBlank() && !compose.sending) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Send")
+                        Text(tr("Send"))
                     }
                 }
             } else {
@@ -400,16 +401,18 @@ private fun FileDraft(file: FileDraftUi, sending: Boolean, running: Boolean, act
             Text(file.name, style = MaterialTheme.typography.titleSmall)
             val zip = if (file.estimate.compressed) ", ${Presenters.formatBytes(file.estimate.wireBytes)} compressed" else ""
             Text(
-                "${Presenters.formatBytes(file.sizeBytes)}$zip · ${file.estimate.chunks} chunks · about " +
-                    "${Presenters.formatDuration(file.estimate.airtimeMs)} on air",
+                tr(
+                    "%s · %d chunks · about %s on air",
+                    Presenters.formatBytes(file.sizeBytes) + zip, file.estimate.chunks, Presenters.formatDuration(file.estimate.airtimeMs),
+                ),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        IconButton(onClick = actions.onClear) { Icon(Icons.Filled.Close, contentDescription = "Remove file") }
+        IconButton(onClick = actions.onClear) { Icon(Icons.Filled.Close, contentDescription = tr("Remove file")) }
     }
     if (file.large) {
         Text(
-            "This is a large file for a radio link. Make sure the channel is free for that long.",
+            tr("This is a large file for a radio link. Make sure the channel is free for that long."),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
         )
@@ -417,9 +420,9 @@ private fun FileDraft(file: FileDraftUi, sending: Boolean, running: Boolean, act
     Button(onClick = actions.onSend, enabled = running && !sending, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
         Spacer(Modifier.width(6.dp))
-        Text("Send file")
+        Text(tr("Send file"))
     }
-    OutlinedButton(onClick = actions.onQueue, modifier = Modifier.fillMaxWidth()) { Text("Add file to queue") }
+    OutlinedButton(onClick = actions.onQueue, modifier = Modifier.fillMaxWidth()) { Text(tr("Add file to queue")) }
 }
 
 @Composable
@@ -434,12 +437,12 @@ private fun ImageDraft(
 ) {
     Row(verticalAlignment = Alignment.Top) {
         if (image.bytes != null) {
-            PayloadImage(image.bytes, "Image preview as it will be sent", Modifier.size(160.dp))
+            PayloadImage(image.bytes, tr("Image preview as it will be sent"), Modifier.size(160.dp))
         } else if (image.busy) {
             CircularProgressIndicator(Modifier.size(48.dp))
         }
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = onClearImage) { Icon(Icons.Filled.Close, contentDescription = "Remove image") }
+        IconButton(onClick = onClearImage) { Icon(Icons.Filled.Close, contentDescription = tr("Remove image")) }
     }
     image.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     if (image.bytes != null) {
@@ -460,7 +463,7 @@ private fun ImageDraft(
     }
     // Re-encode once the thumb is released, not on every drag step.
     var quality by remember(preset.quality) { mutableFloatStateOf(preset.quality.toFloat()) }
-    Text("Quality ${quality.roundToInt()}%", style = MaterialTheme.typography.bodySmall)
+    Text(tr("Quality %d%%", quality.roundToInt()), style = MaterialTheme.typography.bodySmall)
     Slider(
         value = quality,
         onValueChange = { quality = it },
@@ -469,13 +472,13 @@ private fun ImageDraft(
         steps = (ImagePreset.MAX_QUALITY - ImagePreset.MIN_QUALITY) / 5 - 1,
     )
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Grayscale", Modifier.weight(1f))
+        Text(tr("Grayscale"), Modifier.weight(1f))
         Switch(checked = preset.grayscale, onCheckedChange = { onImagePreset(preset.copy(grayscale = it)) })
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text("Preview first")
-            Text("A tiny copy goes out first so the receiver sees the picture early.", style = MaterialTheme.typography.bodySmall)
+            Text(tr("Preview first"))
+            Text(tr("A tiny copy goes out first so the receiver sees the picture early."), style = MaterialTheme.typography.bodySmall)
         }
         Switch(checked = preset.progressive, onCheckedChange = { onImagePreset(preset.copy(progressive = it)) })
     }
@@ -486,15 +489,15 @@ private fun ImageDraft(
     ) {
         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
         Spacer(Modifier.width(6.dp))
-        Text("Send image")
+        Text(tr("Send image"))
     }
     OutlinedButton(onClick = onQueueImage, enabled = image.bytes != null && !image.busy, modifier = Modifier.fillMaxWidth()) {
-        Text("Add image to queue")
+        Text(tr("Add image to queue"))
     }
 }
 
 fun profileLabel(p: ModemProfile): String = when (p) {
-    ModemProfile.ROBUST -> "Robust"
-    ModemProfile.STANDARD -> "Standard"
-    ModemProfile.FAST -> "Fast"
+    ModemProfile.ROBUST -> tr("Robust")
+    ModemProfile.STANDARD -> tr("Standard")
+    ModemProfile.FAST -> tr("Fast")
 }

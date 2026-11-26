@@ -1,5 +1,6 @@
 package com.radiome.feature.transceiver.ui
 
+import com.radiome.feature.transceiver.i18n.tr
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -138,7 +139,7 @@ fun TransceiverApp(
         if (uri != null) scope.launch {
             val picked = FileIo.read(context, uri, Files.MAX_BYTES)
             when {
-                picked == null -> viewModel.notify("That file could not be read.")
+                picked == null -> viewModel.notify(tr("That file could not be read."))
                 picked.bytes == null -> viewModel.onFileTooLarge(picked.size)
                 else -> viewModel.attachFile(picked.name, picked.bytes)
             }
@@ -159,12 +160,12 @@ fun TransceiverApp(
         val bytes = pendingSave
         pendingSave = null
         if (uri != null && bytes != null) scope.launch {
-            viewModel.notify(if (FileIo.write(context, uri, bytes)) "Saved." else "Could not save the file.")
+            viewModel.notify(if (FileIo.write(context, uri, bytes)) tr("Saved.") else tr("Could not save the file."))
         }
     }
     val historyActions = HistoryActions(
         onDelete = { viewModel.deleteHistory(it) },
-        onShareLog = { FileIo.shareText(context, "RadioMe history", viewModel.historyText()) },
+        onShareLog = { FileIo.shareText(context, tr("RadioMe history"), viewModel.historyText()) },
         onSaveLog = {
             pendingSave = viewModel.historyText().toByteArray(Charsets.UTF_8)
             saver.launch("radiome-history.txt")
@@ -179,7 +180,7 @@ fun TransceiverApp(
             r.payload?.let { bytes ->
                 scope.launch {
                     val ok = FileIo.saveToGallery(context, HistoryExport.suggestedName(r), "image/webp", displayImageBytes(r.contentType, bytes))
-                    viewModel.notify(if (ok) "Saved to Pictures/RadioMe." else "Could not save the picture.")
+                    viewModel.notify(if (ok) tr("Saved to Pictures/RadioMe.") else tr("Could not save the picture."))
                 }
             }
         },
@@ -195,7 +196,7 @@ fun TransceiverApp(
                             selected = tab == t,
                             onClick = { tab = t },
                             icon = { Icon(t.icon, contentDescription = null) },
-                            label = { Text(t.label) },
+                            label = { Text(tr(t.label)) },
                         )
                     }
                 }

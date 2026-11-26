@@ -1,5 +1,6 @@
 package com.radiome.feature.transceiver.ui
 
+import com.radiome.feature.transceiver.i18n.tr
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
@@ -61,9 +62,9 @@ fun WaterfallCard(rows: Flow<FloatArray>, modifier: Modifier = Modifier) {
     }
     Card(modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Waterfall", style = MaterialTheme.typography.titleSmall)
+            Text(tr("Waterfall"), style = MaterialTheme.typography.titleSmall)
             val image = bitmap?.asImageBitmap()
-            Canvas(Modifier.fillMaxWidth().height(120.dp).semantics { contentDescription = "Live spectrum of the received audio" }) {
+            Canvas(Modifier.fillMaxWidth().height(120.dp).semantics { contentDescription = tr("Live spectrum of the received audio") }) {
                 tick // redraw on every new row
                 if (image != null) {
                     drawImage(

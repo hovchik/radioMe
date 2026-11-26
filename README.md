@@ -23,6 +23,15 @@ The air protocol (frame layout, tone tables, FEC parameters) is in [docs/PROTOCO
 * Two-phone link test that measures each profile and suggests profile and parity.
 * End-to-end encrypted GPS position beacons (AES-256-GCM, pre-shared group key) shown on an OpenStreetMap map
   with an offline tile cache. Optional encryption for all messages. Not for amateur bands.
+* Group mode for messages to all: every receiver's corrections are merged into one repair and each confirmation
+  is shown as a delivery receipt. Auto speed picks the profile from recent results; a send queue goes one by one.
+* Small files (PDF, GPX, contact cards, up to 64 KB), history export and sharing, pictures saved to the gallery.
+* Live waterfall of the input, larger text and vibration options.
+* Transmit keying by the radio's VOX, a right-channel VOX tone, or USB serial RTS/DTR (Digirig, CP210x, FTDI, CH34x,
+  CDC-ACM).
+* Home-screen widget, quick-settings tile and a lock-screen Stop button.
+* English, Armenian and Russian. Translations live in `feature/transceiver/.../i18n/` keyed by the English text;
+  untranslated strings fall back to English.
 
 ## Build and test
 

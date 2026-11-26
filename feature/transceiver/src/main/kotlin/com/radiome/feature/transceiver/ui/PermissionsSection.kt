@@ -1,5 +1,6 @@
 package com.radiome.feature.transceiver.ui
 
+import com.radiome.feature.transceiver.i18n.tr
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -172,18 +173,18 @@ private fun PermissionRowView(row: PermissionRow, onAction: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text(row.permission.title, style = MaterialTheme.typography.bodyLarge)
             val (status, color) = when (row.status) {
-                PermissionStatus.GRANTED -> "Allowed" to MaterialTheme.colorScheme.primary
-                PermissionStatus.DENIED -> "Not allowed" to MaterialTheme.colorScheme.error
-                PermissionStatus.NOT_NEEDED -> "Not needed" to MaterialTheme.colorScheme.onSurfaceVariant
+                PermissionStatus.GRANTED -> tr("Allowed") to MaterialTheme.colorScheme.primary
+                PermissionStatus.DENIED -> tr("Not allowed") to MaterialTheme.colorScheme.error
+                PermissionStatus.NOT_NEEDED -> tr("Not needed") to MaterialTheme.colorScheme.onSurfaceVariant
             }
             Text(status, style = MaterialTheme.typography.labelLarge, color = color)
             Text(row.permission.purpose, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             row.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         val label = when (row.action) {
-            PermissionAction.REQUEST -> "Allow"
-            PermissionAction.OPEN_SETTINGS -> if (row.status == PermissionStatus.GRANTED) "Manage" else "Open settings"
-            PermissionAction.REVOKE -> "Revoke"
+            PermissionAction.REQUEST -> tr("Allow")
+            PermissionAction.OPEN_SETTINGS -> if (row.status == PermissionStatus.GRANTED) tr("Manage") else tr("Open settings")
+            PermissionAction.REVOKE -> tr("Revoke")
             PermissionAction.NONE -> null
         }
         label?.let { OutlinedButton(onClick = onAction) { Text(it) } }
@@ -209,15 +210,15 @@ private fun RevokeDialog(permission: AppPermission, onDismiss: () -> Unit, onOpe
         text = { Text(text) },
         confirmButton = {
             if (onRevokeNow != null) {
-                TextButton(onClick = onRevokeNow) { Text("Revoke and close") }
+                TextButton(onClick = onRevokeNow) { Text(tr("Revoke and close")) }
             } else {
-                TextButton(onClick = onOpenSettings) { Text("Open settings") }
+                TextButton(onClick = onOpenSettings) { Text(tr("Open settings")) }
             }
         },
         dismissButton = {
             Row {
-                if (onRevokeNow != null) TextButton(onClick = onOpenSettings) { Text("Open settings") }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                if (onRevokeNow != null) TextButton(onClick = onOpenSettings) { Text(tr("Open settings")) }
+                TextButton(onClick = onDismiss) { Text(tr("Cancel")) }
             }
         },
     )

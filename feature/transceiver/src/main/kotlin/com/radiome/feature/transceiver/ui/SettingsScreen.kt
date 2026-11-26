@@ -1,5 +1,6 @@
 package com.radiome.feature.transceiver.ui
 
+import com.radiome.feature.transceiver.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -57,90 +58,91 @@ fun SettingsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Section("Permissions")
+        Section(tr("Permissions"))
         PermissionsSection(onBeforeRevokeMicrophone)
 
-        Section("Station")
+        Section(tr("Station"))
         StationSection(settings, onChange)
 
-        Section("Group encryption")
+        Section(tr("Group encryption"))
         EncryptionSection(settings, onChange, groupKeyFingerprint, keyBusy, onSetPassphrase, onClearKey)
 
-        Section("Radio")
-        Choice("Audio route", RoutePreference.entries, settings.routePreference, {
+        Section(tr("Radio"))
+        Choice(tr("Audio route"), RoutePreference.entries, settings.routePreference, {
             when (it) {
-                RoutePreference.AUTO -> "Auto"
-                RoutePreference.ACOUSTIC -> "Speaker + mic"
-                RoutePreference.CABLE -> "Cable"
+                RoutePreference.AUTO -> tr("Auto")
+                RoutePreference.ACOUSTIC -> tr("Speaker + mic")
+                RoutePreference.CABLE -> tr("Cable")
             }
         }) { v -> onChange { it.copy(routePreference = v) } }
-        Choice("Transmit keying (PTT)", PttMode.entries, settings.pttMode, {
+        Choice(tr("Transmit keying (PTT)"), PttMode.entries, settings.pttMode, {
             when (it) {
-                PttMode.VOX -> "Radio's VOX"
-                PttMode.VOX_TONE -> "Tone on right channel"
-                PttMode.SERIAL_RTS -> "USB serial RTS"
-                PttMode.SERIAL_DTR -> "USB serial DTR"
+                PttMode.VOX -> tr("Radio's VOX")
+                PttMode.VOX_TONE -> tr("Tone on right channel")
+                PttMode.SERIAL_RTS -> tr("USB serial RTS")
+                PttMode.SERIAL_DTR -> tr("USB serial DTR")
             }
         }) { v -> onChange { it.copy(pttMode = v) } }
         Text(
             when (settings.pttMode) {
-                PttMode.VOX -> "The lead-in tone opens the radio's VOX. Works with any cable or acoustically."
-                PttMode.VOX_TONE -> "For cables whose PTT circuit listens to the right audio channel. Data stays on the left."
+                PttMode.VOX -> tr("The lead-in tone opens the radio's VOX. Works with any cable or acoustically.")
+                PttMode.VOX_TONE -> tr("For cables whose PTT circuit listens to the right audio channel. Data stays on the left.")
                 PttMode.SERIAL_RTS, PttMode.SERIAL_DTR ->
-                    "For Digirig and other cables with a USB serial chip (CP210x, FTDI, CH34x, CDC). Plug it in before " +
-                        "turning the radio on and allow USB access when Android asks." +
-                        (pttDevice?.let { " In use: $it." } ?: " No adapter connected yet.")
+                    tr(
+                        "For Digirig and other cables with a USB serial chip (CP210x, FTDI, CH34x, CDC). Plug it in before " +
+                            "turning the radio on and allow USB access when Android asks.",
+                    ) + (pttDevice?.let { tr(" In use: %s.", it) } ?: tr(" No adapter connected yet."))
             },
             style = MaterialTheme.typography.bodySmall,
         )
         IntSlider(
-            "VOX lead-in", settings.leadInMs, ModemConfig.MIN_LEAD_IN_MS, ModemConfig.MAX_LEAD_IN_MS, 50, "ms",
-            "Pilot tone before each burst so the radio's VOX and the far squelch open in time.",
+            tr("VOX lead-in"), settings.leadInMs, ModemConfig.MIN_LEAD_IN_MS, ModemConfig.MAX_LEAD_IN_MS, 50, "ms",
+            tr("Pilot tone before each burst so the radio's VOX and the far squelch open in time."),
         ) { v -> onChange { it.copy(leadInMs = v) } }
-        IntSlider("Output gain", settings.outputGainPercent, RadioSettings.MIN_GAIN, 100, 5, "%", null) { v ->
+        IntSlider(tr("Output gain"), settings.outputGainPercent, RadioSettings.MIN_GAIN, 100, 5, "%", null) { v ->
             onChange { it.copy(outputGainPercent = v) }
         }
 
-        Section("Modem")
-        Choice("Default profile", ModemProfile.entries, settings.defaultProfile, ::profileLabel) { v ->
+        Section(tr("Modem"))
+        Choice(tr("Default profile"), ModemProfile.entries, settings.defaultProfile, ::profileLabel) { v ->
             onChange { it.copy(defaultProfile = v) }
         }
         OptionalIntSlider(
-            "FEC parity", settings.parityPercent, RadioSettings.MIN_PARITY, RadioSettings.MAX_PARITY, 1, "%",
-            "Reed-Solomon parity as a share of data. Off uses the profile default (50 / 33 / 20%).",
+            tr("FEC parity"), settings.parityPercent, RadioSettings.MIN_PARITY, RadioSettings.MAX_PARITY, 1, "%",
+            tr("Reed-Solomon parity as a share of data. Off uses the profile default (50 / 33 / 20%)."),
         ) { v -> onChange { it.copy(parityPercent = v) } }
         OptionalIntSlider(
-            "Interleave depth", settings.interleaveDepth, 1, RadioSettings.MAX_INTERLEAVE, 1, "codewords",
-            "Spreads a burst of lost audio over many codewords. Off uses the profile default.",
+            tr("Interleave depth"), settings.interleaveDepth, 1, RadioSettings.MAX_INTERLEAVE, 1, "codewords",
+            tr("Spreads a burst of lost audio over many codewords. Off uses the profile default."),
         ) { v -> onChange { it.copy(interleaveDepth = v) } }
         IntSlider(
-            "Chunk size", settings.chunkPayloadSize, TransferOptions.MIN_CHUNK, TransferOptions.MAX_CHUNK, 4, "bytes",
-            "Smaller chunks waste less when one is lost; larger ones have less overhead.",
+            tr("Chunk size"), settings.chunkPayloadSize, TransferOptions.MIN_CHUNK, TransferOptions.MAX_CHUNK, 4, "bytes",
+            tr("Smaller chunks waste less when one is lost; larger ones have less overhead."),
         ) { v -> onChange { it.copy(chunkPayloadSize = v) } }
 
-        Section("Display and feedback")
-        Toggle("Waterfall", settings.showWaterfall, "Live spectrum of what the phone hears, on the Radio tab.") { v ->
+        Section(tr("Display and feedback"))
+        Toggle(tr("Waterfall"), settings.showWaterfall, tr("Live spectrum of what the phone hears, on the Radio tab.")) { v ->
             onChange { it.copy(showWaterfall = v) }
         }
-        Toggle("Larger text", settings.largeText, "Makes all text bigger, on top of the system font size.") { v ->
+        Toggle(tr("Larger text"), settings.largeText, tr("Makes all text bigger, on top of the system font size.")) { v ->
             onChange { it.copy(largeText = v) }
         }
-        Toggle("Vibrate on messages", settings.haptics, "A short buzz when a message arrives or is confirmed.") { v ->
+        Toggle(tr("Vibrate on messages"), settings.haptics, tr("A short buzz when a message arrives or is confirmed.")) { v ->
             onChange { it.copy(haptics = v) }
         }
 
-        Section("Corrections (ARQ)")
-        Toggle("Request missing chunks automatically", settings.autoNack,
-            "Off: the dashboard shows a Send correction request button instead.") { v -> onChange { it.copy(autoNack = v) } }
-        Toggle("Confirm complete transfers", settings.sendAck, null) { v -> onChange { it.copy(sendAck = v) } }
-        Toggle("Send repairs in Robust", settings.stepDownToRobust, null) { v -> onChange { it.copy(stepDownToRobust = v) } }
+        Section(tr("Corrections (ARQ)"))
+        Toggle(tr("Request missing chunks automatically"), settings.autoNack,
+            tr("Off: the dashboard shows a Send correction request button instead.")) { v -> onChange { it.copy(autoNack = v) } }
+        Toggle(tr("Confirm complete transfers"), settings.sendAck, null) { v -> onChange { it.copy(sendAck = v) } }
+        Toggle(tr("Send repairs in Robust"), settings.stepDownToRobust, null) { v -> onChange { it.copy(stepDownToRobust = v) } }
         Toggle(
-            "Group mode for messages to all", settings.groupMode,
-            "Several stations listening: wait for everyone's correction requests, repair once, and collect each confirmation.",
+            tr("Group mode for messages to all"), settings.groupMode,
+            tr("Several stations listening: wait for everyone's correction requests, repair once, and collect each confirmation."),
         ) { v -> onChange { it.copy(groupMode = v) } }
         IntSlider(
-            "Turnaround", settings.turnaroundMs, RadioSettings.MIN_TURNAROUND, RadioSettings.MAX_TURNAROUND, 100, "ms",
-            "Quiet time before answering, so the other radio has stopped transmitting.",
+            tr("Turnaround"), settings.turnaroundMs, RadioSettings.MIN_TURNAROUND, RadioSettings.MAX_TURNAROUND, 100, "ms",
+            tr("Quiet time before answering, so the other radio has stopped transmitting."),
         ) { v -> onChange { it.copy(turnaroundMs = v) } }
     }
 }
@@ -154,9 +156,9 @@ private fun StationSection(settings: RadioSettings, onChange: ((RadioSettings) -
             callsign = it.uppercase()
             onChange { s -> s.copy(callsign = it) }
         },
-        label = { Text("Callsign") },
+        label = { Text(tr("Callsign")) },
         supportingText = {
-            Text("Sent in clear at the start of every burst. Others can address messages to it. Letters, digits and /, up to 10.")
+            Text(tr("Sent in clear at the start of every burst. Others can address messages to it. Letters, digits and /, up to 10."))
         },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
@@ -165,16 +167,16 @@ private fun StationSection(settings: RadioSettings, onChange: ((RadioSettings) -
     OutlinedTextField(
         value = quick,
         onValueChange = { quick = it },
-        label = { Text("Quick messages, one per line") },
+        label = { Text(tr("Quick messages, one per line")) },
         modifier = Modifier.fillMaxWidth(),
         minLines = 3,
     )
     val changed = quick.lines().map { it.trim() }.filter { it.isNotEmpty() } != settings.quickMessages
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { onChange { it.copy(quickMessages = quick.lines()) } }, enabled = changed) { Text("Save quick messages") }
-        OutlinedButton(onClick = { onChange { it.copy(quickMessages = RadioSettings.DEFAULT_QUICK_MESSAGES) } }) { Text("Defaults") }
+        OutlinedButton(onClick = { onChange { it.copy(quickMessages = quick.lines()) } }, enabled = changed) { Text(tr("Save quick messages")) }
+        OutlinedButton(onClick = { onChange { it.copy(quickMessages = RadioSettings.DEFAULT_QUICK_MESSAGES) } }) { Text(tr("Defaults")) }
     }
-    Toggle("Images: preview first", settings.imageProgressive, "A tiny copy goes out before the picture, so the receiver sees it early. Costs a few seconds of air time.") { v ->
+    Toggle(tr("Images: preview first"), settings.imageProgressive, tr("A tiny copy goes out before the picture, so the receiver sees it early. Costs a few seconds of air time.")) { v ->
         onChange { it.copy(imageProgressive = v) }
     }
 }
@@ -190,26 +192,26 @@ private fun EncryptionSection(
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
         Text(
-            "Encryption is not allowed on amateur radio bands. Use it only on licence-free (PMR446, FRS) or licensed " +
-                "private channels. The callsign is always sent in clear.",
+            tr("Encryption is not allowed on amateur radio bands. Use it only on licence-free (PMR446, FRS) or licensed " +
+                "private channels. The callsign is always sent in clear."),
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(12.dp),
         )
     }
     Text(
-        if (fingerprint != null) "Group key set · fingerprint $fingerprint" else "No group key. Positions can't be sent or read until you set one.",
+        if (fingerprint != null) tr("Group key set · fingerprint %s", fingerprint) else tr("No group key. Positions can't be sent or read until you set one."),
         style = MaterialTheme.typography.bodyLarge,
     )
     Text(
-        "Everyone in the group enters the same passphrase, then compares fingerprints by voice. The passphrase is not stored; " +
-            "the derived key is kept wrapped by the phone's hardware keystore.",
+        tr("Everyone in the group enters the same passphrase, then compares fingerprints by voice. The passphrase is not stored; " +
+            "the derived key is kept wrapped by the phone's hardware keystore."),
         style = MaterialTheme.typography.bodySmall,
     )
     var pass by remember { mutableStateOf("") }
     OutlinedTextField(
         value = pass,
         onValueChange = { pass = it },
-        label = { Text("Group passphrase") },
+        label = { Text(tr("Group passphrase")) },
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
@@ -222,17 +224,17 @@ private fun EncryptionSection(
                 pass = ""
             },
             enabled = !busy && pass.length >= GroupKey.MIN_PASSPHRASE,
-        ) { Text(if (busy) "Deriving key..." else if (fingerprint == null) "Set key" else "Replace key") }
-        if (fingerprint != null) OutlinedButton(onClick = onClearKey) { Text("Remove key") }
+        ) { Text(if (busy) tr("Deriving key...") else if (fingerprint == null) tr("Set key") else tr("Replace key")) }
+        if (fingerprint != null) OutlinedButton(onClick = onClearKey) { Text(tr("Remove key")) }
     }
     Toggle(
-        "Encrypt messages and images too", settings.encryptMessages,
-        "Positions are always encrypted. This also seals texts, images and files with the group key.",
+        tr("Encrypt messages and images too"), settings.encryptMessages,
+        tr("Positions are always encrypted. This also seals texts, images and files with the group key."),
     ) { v -> onChange { it.copy(encryptMessages = v) } }
-    Choice("Send my position automatically", RadioSettings.BEACON_INTERVALS, settings.beaconIntervalMin, {
-        if (it == 0) "Off" else "$it min"
+    Choice(tr("Send my position automatically"), RadioSettings.BEACON_INTERVALS, settings.beaconIntervalMin, {
+        if (it == 0) tr("Off") else tr("%d min", it)
     }) { v -> onChange { it.copy(beaconIntervalMin = v) } }
-    Choice("Beacon profile", ModemProfile.entries, settings.beaconProfile, ::profileLabel) { v -> onChange { it.copy(beaconProfile = v) } }
+    Choice(tr("Beacon profile"), ModemProfile.entries, settings.beaconProfile, ::profileLabel) { v -> onChange { it.copy(beaconProfile = v) } }
 }
 
 @Composable
