@@ -45,6 +45,10 @@ data class RadioSettings(
     val beaconIntervalMin: Int = 0,
     /** Profile for position beacons: they are tiny, so the robust one costs little. */
     val beaconProfile: ModemProfile = ModemProfile.ROBUST,
+    /** "Auto" speed: pick the profile from how the last transfers went. */
+    val adaptiveSpeed: Boolean = false,
+    /** Messages to all stations collect every receiver's corrections and confirmations (broadcast mode). */
+    val groupMode: Boolean = true,
 ) {
     fun sanitized(): RadioSettings = copy(
         leadInMs = leadInMs.coerceIn(ModemConfig.MIN_LEAD_IN_MS, ModemConfig.MAX_LEAD_IN_MS),
@@ -82,7 +86,11 @@ data class RadioSettings(
             chunkPayloadSize = it.chunkPayloadSize,
             parityRatio = it.parityPercent?.let { p -> p / 100.0 },
             interleaveDepth = it.interleaveDepth,
-            station = if (it.callsign.isEmpty() && dest == null) null else StationInfo(it.callsign, dest),
+            station = when {
+                dest == null && it.groupMode -> StationInfo(it.callsign, null, broadcast = true)
+                it.callsign.isEmpty() && dest == null -> null
+                else -> StationInfo(it.callsign, dest)
+            },
             encrypt = it.encryptMessages,
         )
     }

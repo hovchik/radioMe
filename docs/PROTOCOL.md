@@ -263,3 +263,34 @@ That is 19 bytes, which seals to 63 bytes, so a beacon is one HEADER frame plus 
 about 5 s with the STATION frame). The link refuses to send a POSITION without a group key. Receivers put a fix on the map only if it
 opened with the group key, came from an identified station, and is newer than that station's last fix (and not more
 than 10 minutes in the future), so replaying an old beacon cannot move anyone.
+
+## 12. Broadcast, receipts and auto speed
+
+### Broadcast sessions
+
+A transfer with no destination while group mode is on sets the broadcast flag in its STATION frame. Every station
+that hears it answers, so answers must not collide:
+
+- A receiver waits a random 0..`broadcastBackoffMs` (4 s) after the turnaround before sending its NACK or ACK.
+- The sender keeps listening for turnaround + backoff + 1.5 s, merges every NACK it heard into one set of missing
+  chunks and sends a single repair over that serves all receivers.
+- The session is complete once an answer window passes with only ACKs (or silence after at least one ACK).
+  Each ACK is reported as `AckReceived(sid, by)`; an ACK whose station is unknown is recorded as `?`.
+
+Addressed (non-broadcast) transfers keep the one-receiver ARQ of section 8.
+
+### Delivery receipts
+
+History stores the callsigns that acknowledged each outgoing transfer (`deliveredTo`), shown as "Delivered to ..." on
+the message. For a broadcast this fills in as receivers answer.
+
+### Auto speed
+
+The app keeps an `AdaptiveRate` per link. After each outgoing transfer:
+
+- failed, or more than 15% of chunks missing after the first over: one step slower (Fast, Standard, Robust);
+- two transfers in a row with nothing missing: one step faster;
+- otherwise the profile stays.
+
+A link test's suggestion resets the starting point. Queued messages marked Auto take the current profile when they
+go on air, one at a time.

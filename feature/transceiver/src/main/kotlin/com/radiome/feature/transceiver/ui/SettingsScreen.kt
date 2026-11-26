@@ -101,6 +101,10 @@ fun SettingsScreen(
             "Off: the dashboard shows a Send correction request button instead.") { v -> onChange { it.copy(autoNack = v) } }
         Toggle("Confirm complete transfers", settings.sendAck, null) { v -> onChange { it.copy(sendAck = v) } }
         Toggle("Send repairs in Robust", settings.stepDownToRobust, null) { v -> onChange { it.copy(stepDownToRobust = v) } }
+        Toggle(
+            "Group mode for messages to all", settings.groupMode,
+            "Several stations listening: wait for everyone's correction requests, repair once, and collect each confirmation.",
+        ) { v -> onChange { it.copy(groupMode = v) } }
         IntSlider(
             "Turnaround", settings.turnaroundMs, RadioSettings.MIN_TURNAROUND, RadioSettings.MAX_TURNAROUND, 100, "ms",
             "Quiet time before answering, so the other radio has stopped transmitting.",

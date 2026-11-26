@@ -90,7 +90,10 @@ class SettingsTest {
 
     @Test
     fun callsignAndAddresseeMakeTheStationFrame() {
-        assertNull(RadioSettings().transferOptions().station)
+        // To everyone: a broadcast (merged corrections), unless group mode is off.
+        assertTrue(RadioSettings().transferOptions().station!!.broadcast)
+        assertNull(RadioSettings(groupMode = false).transferOptions().station)
+        assertFalse(RadioSettings(callsign = "EK1A").transferOptions(to = "EK2B").station!!.broadcast)
         val o = RadioSettings(callsign = "ek1a").transferOptions(ModemProfile.FAST, to = "ek2b")
         assertEquals("EK1A", o.station!!.source)
         assertEquals("EK2B", o.station!!.destination)

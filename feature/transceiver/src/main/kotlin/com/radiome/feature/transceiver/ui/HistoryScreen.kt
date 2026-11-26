@@ -75,6 +75,7 @@ private fun HistoryRow(r: TransferRecord, onDelete: () -> Unit) {
                 r.payload != null -> Text("${r.payload!!.size} bytes ${r.name}")
                 else -> Unit
             }
+            if (r.direction == Direction.OUTGOING) Receipt(r)
             if (r.totalChunks > 0) {
                 Text(
                     "${r.receivedChunks.takeIf { r.direction == Direction.INCOMING } ?: r.totalChunks}/${r.totalChunks} chunks · " +
@@ -84,6 +85,24 @@ private fun HistoryRow(r: TransferRecord, onDelete: () -> Unit) {
             }
         }
     }
+}
+
+/** Delivery receipt for a sent message: who confirmed it, or where it stands. */
+@Composable
+private fun Receipt(r: TransferRecord) {
+    val (text, color) = when (r.status) {
+        TransferStatus.DELIVERED -> {
+            val who = r.deliveredTo.map { if (it == "?") "a station without callsign" else it }
+            ("Delivered" + if (who.isEmpty()) "" else " to " + who.joinToString(", ")) to RadioColors.ok
+        }
+        TransferStatus.SENDING -> (
+            if (r.deliveredTo.isEmpty()) "Sent, waiting for confirmation" else "Confirmed so far by " + r.deliveredTo.joinToString(", ")
+            ) to MaterialTheme.colorScheme.onSurfaceVariant
+        TransferStatus.FAILED -> "Not delivered" to RadioColors.missing
+        TransferStatus.CANCELLED -> "Cancelled" to MaterialTheme.colorScheme.onSurfaceVariant
+        else -> return
+    }
+    Text(text, style = MaterialTheme.typography.bodyMedium, color = color)
 }
 
 private fun statusLabel(s: TransferStatus): String = when (s) {

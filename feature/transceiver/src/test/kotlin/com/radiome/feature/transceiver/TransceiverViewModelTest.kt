@@ -269,4 +269,40 @@ class TransceiverViewModelTest {
         waitUntil { client.sent.size == 1 }
         assertTrue(client.sent.single().second.encrypt)
     }
+
+    @Test
+    fun queuedMessagesGoOutOneAfterAnother() = runBlocking {
+        vm.onDraftChange("first")
+        vm.queueText()
+        vm.onDraftChange("second")
+        vm.queueText()
+        assertEquals(2, vm.queue.value.size)
+        assertTrue(client.sent.isEmpty())
+
+        vm.startListening()
+        waitUntil { client.sent.size == 1 }
+        assertEquals("first", client.sent[0].first.asText())
+        Thread.sleep(200)
+        assertEquals(1, client.sent.size)
+
+        client.events.tryEmit(LinkEvent.Delivered(client.nextSid - 1, by = "N0CALL"))
+        waitUntil { client.sent.size == 2 }
+        assertEquals("second", client.sent[1].first.asText())
+        waitUntil { vm.queue.value.isEmpty() }
+    }
+
+    @Test
+    fun autoSpeedStepsDownAfterAFailedTransfer() = runBlocking {
+        vm.startListening()
+        vm.onProfileChange(ModemProfile.STANDARD)
+        vm.onAutoSpeed(true)
+        val start = vm.compose.value.profile
+        vm.onDraftChange("will not make it")
+        vm.sendText()
+        waitUntil { client.sent.size == 1 }
+        client.events.tryEmit(LinkEvent.Failed(client.nextSid - 1, "no answer"))
+        waitUntil { vm.compose.value.profile != start }
+        assertEquals(ModemProfile.ROBUST, vm.compose.value.profile)
+        assertTrue(vm.compose.value.auto)
+    }
 }

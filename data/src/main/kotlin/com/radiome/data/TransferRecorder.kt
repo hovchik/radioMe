@@ -43,7 +43,11 @@ class TransferRecorder(
                         }
                     }
                     is LinkEvent.CorrectionsNeeded -> repository.setIncomingStatus(e.sessionId, TransferStatus.INCOMPLETE)
-                    is LinkEvent.Delivered -> repository.setOutgoingStatus(e.sessionId, TransferStatus.DELIVERED)
+                    is LinkEvent.Delivered -> {
+                        repository.setOutgoingStatus(e.sessionId, TransferStatus.DELIVERED)
+                        repository.addDeliveredTo(e.sessionId, e.by)
+                    }
+                    is LinkEvent.AckReceived -> repository.addDeliveredTo(e.sessionId, e.by ?: "?")
                     is LinkEvent.Failed -> {
                         repository.setOutgoingStatus(e.sessionId, TransferStatus.FAILED)
                         repository.setIncomingStatus(e.sessionId, TransferStatus.FAILED)

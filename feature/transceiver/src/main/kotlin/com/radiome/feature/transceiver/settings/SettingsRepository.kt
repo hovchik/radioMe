@@ -78,6 +78,8 @@ class SettingsRepository(
             encryptMessages = this[ENCRYPT] ?: d.encryptMessages,
             beaconIntervalMin = this[BEACON_MIN] ?: d.beaconIntervalMin,
             beaconProfile = enumOr(this[BEACON_PROFILE], d.beaconProfile),
+            adaptiveSpeed = this[ADAPTIVE] ?: d.adaptiveSpeed,
+            groupMode = this[GROUP_MODE] ?: d.groupMode,
         ).sanitized()
     }
 
@@ -103,6 +105,8 @@ class SettingsRepository(
         this[ENCRYPT] = s.encryptMessages
         this[BEACON_MIN] = s.beaconIntervalMin
         this[BEACON_PROFILE] = s.beaconProfile.name
+        this[ADAPTIVE] = s.adaptiveSpeed
+        this[GROUP_MODE] = s.groupMode
     }
 
     private companion object {
@@ -126,6 +130,8 @@ class SettingsRepository(
         val ENCRYPT = booleanPreferencesKey("encrypt_messages")
         val BEACON_MIN = intPreferencesKey("beacon_interval_min")
         val BEACON_PROFILE = stringPreferencesKey("beacon_profile")
+        val ADAPTIVE = booleanPreferencesKey("adaptive_speed")
+        val GROUP_MODE = booleanPreferencesKey("group_mode")
         const val QUICK_SEPARATOR = "\n"
 
         inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =

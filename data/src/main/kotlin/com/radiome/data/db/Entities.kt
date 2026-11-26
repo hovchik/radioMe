@@ -40,6 +40,8 @@ data class TransferEntity(
     val peer: String? = null,
     /** It travelled sealed with the group key. */
     @ColumnInfo(defaultValue = "0") val encrypted: Boolean = false,
+    /** Outgoing: callsigns that confirmed it, comma separated ("?" for an unidentified station). */
+    val deliveredTo: String? = null,
 )
 
 /** A received chunk of an incoming transfer. */

@@ -46,6 +46,8 @@ data class TransferRecord(
     /** Sender of an incoming transfer, addressee of an outgoing one; null = unknown or all stations. */
     val peer: String? = null,
     val encrypted: Boolean = false,
+    /** Callsigns that confirmed an outgoing transfer. */
+    val deliveredTo: List<String> = emptyList(),
 )
 
 /**
@@ -93,6 +95,13 @@ class TransferRepository(
                 encrypted = encrypted || payload.type == ContentType.POSITION,
             ),
         )
+    }
+
+    /** A station confirmed [sessionId]; [by] may be a comma list (broadcast) or null (unidentified). */
+    fun addDeliveredTo(sessionId: Int, by: String?) = updateLatest(sessionId, Direction.OUTGOING) {
+        val have = it.deliveredTo?.split(",")?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
+        val add = by?.split(",")?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
+        it.copy(deliveredTo = (have + add).distinct().joinToString(",").ifEmpty { null })
     }
 
     fun setOutgoingStatus(sessionId: Int, status: TransferStatus) = updateLatest(sessionId, Direction.OUTGOING) {
@@ -176,4 +185,5 @@ internal fun TransferEntity.toRecord() = TransferRecord(
     updatedAt = updatedAt,
     peer = peer,
     encrypted = encrypted,
+    deliveredTo = deliveredTo?.split(",")?.filter { it.isNotEmpty() }.orEmpty(),
 )

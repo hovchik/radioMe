@@ -138,4 +138,37 @@ class StationLinkTest {
         val got = awaitEvent(b, 120) { it is LinkEvent.MessageReceived } as LinkEvent.MessageReceived
         assertEquals(photo, got.payload)
     }
+
+    @Test
+    fun `broadcast merges both receivers' corrections into one repair and completes after both confirm`() = runTest(timeout = 10.minutes) {
+        val air = SimulatedAir().also { it.start(backgroundScope) }
+        // The first over loses different parts at B and at C.
+        air.channel = { from, to, idx ->
+            when {
+                from == "A" && idx == 0 && to == "B" -> ChannelConfig(snrDb = 12.0, dropouts = listOf(Dropout(6_000.0, 1_500.0)), seed = 21)
+                from == "A" && idx == 0 && to == "C" -> ChannelConfig(snrDb = 12.0, dropouts = listOf(Dropout(14_000.0, 1_500.0)), seed = 22)
+                else -> ChannelConfig(snrDb = 12.0, seed = 30L + idx)
+            }
+        }
+        val a = station(air, "A", "EK1A", 31)
+        val b = station(air, "B", "EK2B", 32)
+        val c = station(air, "C", "EK3C", 33)
+        delay(500)
+        val photo = Payload(ContentType.IMAGE_WEBP, Random(9).nextBytes(1500), "group.webp")
+        val sid = a.link.send(photo, TransferOptions(profile = ModemProfile.FAST, station = StationInfo("", broadcast = true)))
+
+        val nb = awaitEvent(b, 120) { it is LinkEvent.NackSent } as LinkEvent.NackSent
+        val nc = awaitEvent(c, 120) { it is LinkEvent.NackSent } as LinkEvent.NackSent
+        assertTrue(nb.missing.toSet() != nc.missing.toSet(), "the test needs different losses: ${nb.missing} / ${nc.missing}")
+        assertEquals(photo, (awaitEvent(b, 180) { it is LinkEvent.MessageReceived } as LinkEvent.MessageReceived).payload)
+        assertEquals(photo, (awaitEvent(c, 180) { it is LinkEvent.MessageReceived } as LinkEvent.MessageReceived).payload)
+
+        val repairs = a.events.filterIsInstance<LinkEvent.Transmitted>().filter { it.kind == LinkEvent.Transmitted.Kind.REPAIR }
+        assertEquals(1, repairs.size, "one merged repair, not one per receiver: $repairs")
+        assertEquals((nb.missing + nc.missing).distinct().sorted(), repairs.single().chunks)
+        val delivered = awaitEvent(a, 120) { it is LinkEvent.Delivered } as LinkEvent.Delivered
+        assertEquals(setOf("EK2B", "EK3C"), delivered.by!!.split(", ").toSet())
+        assertEquals(sid, delivered.sessionId)
+        println(air.log)
+    }
 }

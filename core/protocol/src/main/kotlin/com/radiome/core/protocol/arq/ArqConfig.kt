@@ -20,10 +20,16 @@ data class ArqConfig(
     val sendAck: Boolean = true,
     /** Profile used for NACK, ACK and header polls. */
     val controlProfile: ModemProfile = ModemProfile.ROBUST,
+    /**
+     * Broadcast sessions: each receiver waits a random extra 0..this before answering, so several receivers do not
+     * key up at once, and the sender collects every correction request for that long before repairing.
+     */
+    val broadcastBackoffMs: Int = 4000,
 ) {
     init {
         require(turnaroundMs in 0..10_000)
         require(responseTimeoutMs in 1_000..60_000)
         require(maxRepairRounds in 0..50 && maxPolls in 0..10)
+        require(broadcastBackoffMs in 0..30_000)
     }
 }
