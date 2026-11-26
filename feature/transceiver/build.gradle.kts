@@ -34,6 +34,7 @@ kotlin {
 
 dependencies {
     api(project(":core:audio"))
+    implementation(project(":core:voice"))
     api(project(":data"))
 
     implementation(libs.androidx.core.ktx)

@@ -43,6 +43,7 @@ val androidSdkAvailable: Boolean = run {
 }
 if (androidSdkAvailable) {
     include(":core:audio")
+    include(":core:voice")
     include(":data")
     // Phase 4: Compose UI and the application shell (Hilt).
     include(":feature:transceiver")

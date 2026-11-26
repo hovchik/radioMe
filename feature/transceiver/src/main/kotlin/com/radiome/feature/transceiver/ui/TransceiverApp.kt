@@ -145,6 +145,25 @@ fun TransceiverApp(
             }
         }
     }
+    val micForVoice = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) viewModel.startVoiceRecording() else viewModel.notify(tr("Allow the microphone to record a voice note."))
+    }
+    val voiceActions = remember(viewModel) {
+        VoiceActions(
+            onRecord = {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    viewModel.startVoiceRecording()
+                } else {
+                    micForVoice.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            },
+            onStop = viewModel::stopVoiceRecording,
+            onPlay = viewModel::playVoiceDraft,
+            onClear = viewModel::clearVoice,
+            onSend = viewModel::sendVoice,
+            onQueue = viewModel::queueVoice,
+        )
+    }
     val fileActions = remember(viewModel) {
         FileActions({ filePicker.launch(arrayOf("*/*")) }, viewModel::clearFile, viewModel::sendFile, viewModel::queueFile)
     }
@@ -165,6 +184,7 @@ fun TransceiverApp(
     }
     val historyActions = HistoryActions(
         onDelete = { viewModel.deleteHistory(it) },
+        onPlayVoice = { r -> r.payload?.let(viewModel::playVoice) },
         onShareLog = { FileIo.shareText(context, tr("RadioMe history"), viewModel.historyText()) },
         onSaveLog = {
             pendingSave = viewModel.historyText().toByteArray(Charsets.UTF_8)
@@ -232,6 +252,7 @@ fun TransceiverApp(
                     queue = queue,
                     queueActions = queueActions,
                     fileActions = fileActions,
+                    voiceActions = voiceActions,
                     waterfall = if (settings.showWaterfall) viewModel.waterfall else null,
                     modifier = modifier,
                 )

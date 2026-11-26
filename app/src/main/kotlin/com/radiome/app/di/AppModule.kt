@@ -24,6 +24,8 @@ import com.radiome.feature.transceiver.link.ServiceTransceiverClient
 import com.radiome.feature.transceiver.link.TransceiverClient
 import com.radiome.feature.transceiver.link.TransferHistory
 import com.radiome.feature.transceiver.settings.SettingsRepository
+import com.radiome.feature.transceiver.voice.AndroidVoiceNotes
+import com.radiome.feature.transceiver.voice.VoiceNotes
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -79,6 +81,9 @@ object AppModule {
         location: LocationSource,
         @AppScope scope: CoroutineScope,
     ): PositionBeacon = PositionBeacon(client, settings, keys, location, scope)
+
+    @Provides @Singleton
+    fun voiceNotes(@ApplicationContext context: Context): VoiceNotes = AndroidVoiceNotes(context)
 
     @Provides @Singleton
     fun history(repository: TransferRepository): TransferHistory = RoomTransferHistory(repository)

@@ -20,6 +20,8 @@ import com.radiome.feature.transceiver.link.OutputStatus
 import com.radiome.feature.transceiver.link.RouteInfo
 import com.radiome.feature.transceiver.link.TransceiverClient
 import com.radiome.feature.transceiver.link.TransferHistory
+import com.radiome.feature.transceiver.voice.VoiceNotes
+import com.radiome.core.protocol.payload.VoiceNote
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -114,6 +116,27 @@ class FakePositions : PositionHistory {
     val items = MutableStateFlow<List<StationPosition>>(emptyList())
     override fun observe(): Flow<List<StationPosition>> = items
     override suspend fun clear() { items.value = emptyList() }
+}
+
+/** Records [frames] frames of silence-free "speech" each time. */
+class FakeVoice(var frames: Int = 250) : VoiceNotes {
+    override val available = true
+    override var isRecording = false
+    override var elapsedMs = 0L
+    val played = mutableListOf<VoiceNote>()
+    override fun startRecording(): Boolean {
+        isRecording = true
+        elapsedMs = 0
+        return true
+    }
+    override suspend fun stopRecording(): VoiceNote? {
+        isRecording = false
+        if (frames == 0) return null
+        return VoiceNote(VoiceNote.MODE_700C, 28, List(frames) { byteArrayOf(it.toByte(), 0x55, 0x2A, 0x70) })
+    }
+    override fun cancelRecording() { isRecording = false }
+    override suspend fun play(note: VoiceNote) { played += note }
+    override fun stopPlayback() = Unit
 }
 
 fun waitUntil(timeoutMs: Long = 5_000, condition: () -> Boolean) {

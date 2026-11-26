@@ -30,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.radiome.core.protocol.link.Direction
 import com.radiome.core.protocol.payload.ContentType
+import com.radiome.core.protocol.payload.VoiceNote
+import androidx.compose.material.icons.filled.PlayArrow
 import com.radiome.data.TransferRecord
 import com.radiome.feature.transceiver.Presenters
 import com.radiome.data.TransferStatus
@@ -39,6 +41,7 @@ import java.util.Date
 /** Getting things out of the history: whole log, received files and pictures. */
 class HistoryActions(
     val onDelete: (Long) -> Unit,
+    val onPlayVoice: (TransferRecord) -> Unit,
     val onShareLog: () -> Unit,
     val onSaveLog: () -> Unit,
     /** Save an image or file through the document picker. */
@@ -100,6 +103,16 @@ private fun HistoryRow(r: TransferRecord, actions: HistoryActions) {
                     PayloadImage(displayImageBytes(r.contentType, r.payload!!), "Image ${r.name}", Modifier.fillMaxWidth().heightIn(max = 240.dp))
                 r.contentType == ContentType.BINARY && r.payload != null ->
                     Text(tr("File %s · %s", r.name.ifBlank { tr("without name") }, Presenters.formatBytes(r.payload!!.size)), style = MaterialTheme.typography.bodyLarge)
+                r.contentType == ContentType.VOICE && r.payload != null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { actions.onPlayVoice(r) }) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(tr("Play"))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    val secs = (VoiceNote.decode(r.payload!!)?.durationMs() ?: 0L).plus(500) / 1000
+                    Text(tr("Voice note %d s", secs), style = MaterialTheme.typography.bodyLarge)
+                }
                 r.payload != null -> Text("${r.payload!!.size} bytes ${r.name}")
                 else -> Unit
             }
