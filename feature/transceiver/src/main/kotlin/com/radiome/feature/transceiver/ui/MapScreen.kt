@@ -168,10 +168,13 @@ fun MapScreen(
         }
     }
     val saveArea: () -> Unit = save@{
+        if (saveJob?.isActive == true) return@save
         val view = map ?: return@save
         val box = view.boundingBox
         val plan = MapGeo.planSave(box.latNorth, box.latSouth, box.lonEast, box.lonWest, view.zoomLevelDouble) ?: return@save
         saveResult = null
+        // Busy from the first tap, not from the first finished tile, so a second tap can't start another save.
+        saving = AreaDownloader.Progress(0, plan.sumOf { it.count }, 0, 0)
         saveJob = scope.launch {
             try {
                 val done = AreaDownloader.save(plan) { p -> view.post { saving = p } }
@@ -326,6 +329,8 @@ fun MapScreen(
             onOnlineChange = {
                 onlineTiles = it
                 OfflineMaps.setOnlineTiles(context, it)
+                // "Off" means no internet at all, including a save in progress.
+                if (!it) saveJob?.cancel()
                 map?.setUseDataConnection(it)
             },
             onFilesChanged = { map?.let { reloadTiles(it, onlineTiles) } },
