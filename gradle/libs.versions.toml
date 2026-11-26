@@ -9,13 +9,13 @@ room = "2.7.2"
 robolectric = "4.16.1"
 androidx-test-core = "1.6.1"
 junit4 = "4.13.2"
-# Android (Phase 4). Hilt 2.59 is the last release whose Gradle plugin supports AGP 8. Keep hilt in sync with the buildscript block in the root build.gradle.kts.
+# Android (Phase 4). Hilt 2.58 is the last release whose Gradle plugin works with AGP 8 (2.59 uses an AGP 9 API, 2.59.1+ requires AGP 9). Keep hilt in sync with the buildscript block in the root build.gradle.kts.
 compose-bom = "2025.08.00"
 activity-compose = "1.10.1"
 lifecycle = "2.9.2"
 core-ktx = "1.16.0"
 datastore = "1.1.7"
-hilt = "2.59"
+hilt = "2.58"
 hilt-navigation-compose = "1.2.0"
 
 [libraries]
