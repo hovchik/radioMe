@@ -79,6 +79,12 @@ dependencies {
     robolectricAndroid("org.robolectric:android-all-instrumented:14-robolectric-10818077-i7")
 }
 tasks.withType<Test>().configureEach {
+    // Full stack traces in the CI log, so a crash a test reproduces can be read there.
+    testLogging {
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showStackTraces = true
+        showCauses = true
+    }
     val jars = robolectricAndroid
     inputs.files(jars).withPropertyName("robolectricAndroid").withNormalizer(ClasspathNormalizer::class.java)
     jvmArgumentProviders += CommandLineArgumentProvider {
