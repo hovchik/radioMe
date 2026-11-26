@@ -205,9 +205,9 @@ fun MapScreen(
         Box(Modifier.fillMaxWidth().weight(1f)) {
             AndroidView(
                 factory = { ctx ->
-                    TrackedMapView(ctx).apply {
+                    MapView(ctx).apply {
                         // Compose can detach and re-attach the view (tab changes, layout passes); by default osmdroid
-                        // tears the map down on detach, leaving overlays unusable. We detach it ourselves on dispose.
+                        // tears the map down on detach, leaving overlays unusable. We detach it ourselves in onRelease.
                         setDestroyMode(false)
                         setTileSource(TileSourceFactory.MAPNIK)
                         setUseDataConnection(onlineTiles)
@@ -230,6 +230,12 @@ fun MapScreen(
                         overlays.add(CopyrightOverlay(ctx))
                         map = this
                     }
+                },
+                onRelease = { view ->
+                    // The only place the map is torn down: Compose is done with this view for good.
+                    MapCamera.save(view)
+                    if (map === view) map = null
+                    view.onDetach()
                 },
                 update = { view ->
                     // With a live fix the GPS dot is "you"; the last position you sent would be a second, older you.
@@ -378,7 +384,8 @@ fun MapScreen(
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, map) {
-        // This effect's own view: when `map` goes from null to the new view, the old effect must not detach it.
+        // Only pause and resume here. This effect can restart while the view is still on screen (a new lifecycle
+        // owner, a new view), so tearing the map down here crashed the next render; AndroidView's onRelease does it.
         val view = map
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -391,7 +398,6 @@ fun MapScreen(
         onDispose {
             lifecycle.removeObserver(observer)
             view?.let { MapCamera.save(it) }
-            view?.onDetach()
         }
     }
 
@@ -810,17 +816,6 @@ private class StationLayers {
 }
 
 /** A map that knows when osmdroid has torn it down, so nothing is added to it afterwards. */
-private class TrackedMapView(context: Context) : MapView(context) {
-    var detached = false
-        private set
-
-    override fun onDetach() {
-        detached = true
-        System.err.println("TrackedMapView.onDetach\n" + Throwable().stackTraceToString())
-        super.onDetach()
-    }
-}
-
 private class StationIcon(val drawable: BitmapDrawable, val anchorV: Float)
 
 /** A coloured dot with the callsign in a small label under it, so stations are told apart without tapping. */

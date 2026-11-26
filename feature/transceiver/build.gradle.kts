@@ -84,7 +84,6 @@ tasks.withType<Test>().configureEach {
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         showStackTraces = true
         showCauses = true
-        showStandardStreams = true
     }
     val jars = robolectricAndroid
     inputs.files(jars).withPropertyName("robolectricAndroid").withNormalizer(ClasspathNormalizer::class.java)
