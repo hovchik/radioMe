@@ -20,6 +20,10 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -61,4 +65,23 @@ dependencies {
 
     testImplementation(libs.junit4)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Compose screens rendered under Robolectric, to catch crashes before they reach a phone.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
+}
+
+// Same offline Robolectric setup as :data (see the note there).
+val robolectricAndroid: Configuration by configurations.creating
+dependencies {
+    robolectricAndroid("org.robolectric:android-all-instrumented:14-robolectric-10818077-i7")
+}
+tasks.withType<Test>().configureEach {
+    val jars = robolectricAndroid
+    inputs.files(jars).withPropertyName("robolectricAndroid").withNormalizer(ClasspathNormalizer::class.java)
+    jvmArgumentProviders += CommandLineArgumentProvider {
+        listOf("-Drobolectric.offline=true", "-Drobolectric.dependency.dir=${jars.singleFile.parentFile.absolutePath}")
+    }
 }
