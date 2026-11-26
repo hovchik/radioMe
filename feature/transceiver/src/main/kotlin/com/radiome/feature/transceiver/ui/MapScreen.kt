@@ -205,7 +205,7 @@ fun MapScreen(
         Box(Modifier.fillMaxWidth().weight(1f)) {
             AndroidView(
                 factory = { ctx ->
-                    MapView(ctx).apply {
+                    TrackedMapView(ctx).apply {
                         // Compose can detach and re-attach the view (tab changes, layout passes); by default osmdroid
                         // tears the map down on detach, leaving overlays unusable. We detach it ourselves on dispose.
                         setDestroyMode(false)
@@ -806,6 +806,18 @@ private class StationLayers {
         shown += markers
         if (icons.size > 200) icons.clear()
         view.invalidate()
+    }
+}
+
+/** A map that knows when osmdroid has torn it down, so nothing is added to it afterwards. */
+private class TrackedMapView(context: Context) : MapView(context) {
+    var detached = false
+        private set
+
+    override fun onDetach() {
+        detached = true
+        System.err.println("TrackedMapView.onDetach\n" + Throwable().stackTraceToString())
+        super.onDetach()
     }
 }
 
