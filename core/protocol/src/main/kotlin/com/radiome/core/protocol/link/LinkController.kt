@@ -192,11 +192,11 @@ class LinkController(
             }
             if (failure != null) {
                 val reason = "audio output failed: ${failure.message ?: failure::class.simpleName}"
-                emit(LinkEvent.AudioOutputFailed(job.sessionId, reason))
-                senders[job.sessionId]?.let { sender ->
-                    awaiting.remove(job.sessionId)
-                    if (sender.abort(reason) is SenderAction.Failed) emit(LinkEvent.Failed(job.sessionId, reason))
-                }
+                val sender = senders[job.sessionId]
+                val aborted = sender != null && sender.abort(reason) is SenderAction.Failed
+                if (sender != null) awaiting.remove(job.sessionId)
+                emit(LinkEvent.AudioOutputFailed(job.sessionId, reason, transferFailed = aborted))
+                if (aborted) emit(LinkEvent.Failed(job.sessionId, reason))
             } else {
                 job.onDone()
             }

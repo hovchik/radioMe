@@ -54,7 +54,7 @@ class AudioFailureTest {
 
         val sid = link.send(Payload.text("first"))
         delay(2_000)
-        assertTrue(events.any { it is LinkEvent.AudioOutputFailed && it.sessionId == sid }, "$events")
+        assertTrue(events.any { it is LinkEvent.AudioOutputFailed && it.sessionId == sid && it.transferFailed }, "$events")
         assertTrue(events.any { it is LinkEvent.Failed && it.sessionId == sid }, "$events")
         assertEquals(SenderPhase.FAILED.name, link.transfers.value[sid]?.phase)
         assertEquals(LinkState.LISTENING, link.state.value)

@@ -207,8 +207,12 @@ object Presenters {
         }
         is LinkEvent.Delivered -> "Delivered: the other station confirmed transfer %04X".format(e.sessionId)
         is LinkEvent.Failed -> "Transfer %04X failed: %s".format(e.sessionId, e.reason)
-        // For transfers the Failed event that follows says it; a test tone has no transfer.
-        is LinkEvent.AudioOutputFailed -> if (e.sessionId == LinkController.TEST_TONE_SESSION) "Test tone failed: ${e.reason}" else null
+        // When it ended a transfer, the Failed event that follows says so.
+        is LinkEvent.AudioOutputFailed -> when {
+            e.transferFailed -> null
+            e.sessionId == LinkController.TEST_TONE_SESSION -> "Test tone failed: ${e.reason}"
+            else -> "Could not answer transfer %04X (correction request or confirmation): %s".format(e.sessionId, e.reason)
+        }
         is LinkEvent.CorrectionsNeeded -> if (autoNack) null else
             "${e.missing.size} chunks missing from %04X. Send a correction request when the channel is clear.".format(e.sessionId)
         else -> null
