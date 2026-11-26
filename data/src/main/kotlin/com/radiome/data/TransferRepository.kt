@@ -42,6 +42,8 @@ data class TransferRecord(
     val profile: String?,
     val createdAt: Long,
     val updatedAt: Long,
+    /** Sender of an incoming transfer, addressee of an outgoing one; null = unknown or all stations. */
+    val peer: String? = null,
 )
 
 /**
@@ -58,7 +60,7 @@ class TransferRepository(
 
     fun byId(id: Long): TransferRecord? = dao.byId(id)?.toRecord()
 
-    fun recordOutgoing(sessionId: Int, payload: Payload, totalChunks: Int, profile: String): Long {
+    fun recordOutgoing(sessionId: Int, payload: Payload, totalChunks: Int, profile: String, peer: String? = null): Long {
         val t = now()
         return dao.insert(
             TransferEntity(
@@ -78,6 +80,7 @@ class TransferRepository(
                 profile = profile,
                 createdAt = t,
                 updatedAt = t,
+                peer = peer,
             ),
         )
     }
@@ -86,8 +89,9 @@ class TransferRepository(
         it.copy(status = status.name)
     }
 
-    fun markReceived(sessionId: Int, payload: Payload) = updateLatest(sessionId, Direction.INCOMING) {
+    fun markReceived(sessionId: Int, payload: Payload, from: String? = null) = updateLatest(sessionId, Direction.INCOMING) {
         it.copy(
+            peer = from ?: it.peer,
             status = TransferStatus.COMPLETE.name,
             contentType = payload.type.name,
             name = payload.name,
@@ -105,6 +109,7 @@ class TransferRepository(
     /** Copy live counters from the link's telemetry. */
     fun applyTelemetry(t: TransferTelemetry) = updateLatest(t.sessionId, t.direction) {
         it.copy(
+            peer = if (t.direction == Direction.INCOMING) t.peer ?: it.peer else it.peer,
             totalChunks = if (t.totalChunks > 0) t.totalChunks else it.totalChunks,
             receivedChunks = if (t.direction == Direction.INCOMING) t.receivedChunks else it.receivedChunks,
             fecCorrectedBytes = t.fecCorrectedBytes,
@@ -145,4 +150,5 @@ internal fun TransferEntity.toRecord() = TransferRecord(
     profile = profile,
     createdAt = createdAt,
     updatedAt = updatedAt,
+    peer = peer,
 )

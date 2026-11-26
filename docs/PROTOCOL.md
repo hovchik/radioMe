@@ -76,7 +76,8 @@ Big-endian. All frames in one burst share the same payload capacity P (default 4
 | 9+P    | 2    | CRC-16/CCITT-FALSE over bytes 0 .. 8+P                      |
 | 11+P   | nsym | Reed-Solomon parity (added per codeword by `BurstCodec`)    |
 
-FrameType: `DATA = 1`, `HEADER = 2` (session metadata, defined in Phase 2), `NACK = 3`, `ACK = 4`.
+FrameType: `DATA = 1`, `HEADER = 2` (session metadata, defined in Phase 2), `NACK = 3`, `ACK = 4`,
+`STATION = 5`, `PROBE = 6`, `PROBE_REPORT = 7` (section 10). Older receivers drop frame types they do not know.
 
 NACK payload, whichever form covers more indices per frame:
 
@@ -132,7 +133,7 @@ HEADER frame payload:
 | Offset | Size | Field                                              |
 |--------|------|----------------------------------------------------|
 | 0      | 1    | Header version (= 1)                               |
-| 1      | 1    | Content type: TEXT = 1, IMAGE_WEBP = 2, BINARY = 3 |
+| 1      | 1    | Content type: TEXT = 1, IMAGE_WEBP = 2, BINARY = 3, IMAGE_PROGRESSIVE = 4 |
 | 2      | 1    | Flags: bit 0 = raw DEFLATE                         |
 | 3      | 4    | Wire length (bytes carried by DATA chunks)         |
 | 7      | 4    | Original length                                    |
@@ -167,6 +168,20 @@ Sender                                   Receiver
 * Half-duplex guard: captured audio is dropped while transmitting, the demodulator is reset afterwards, and a
   queued burst waits until the channel is quiet (listen before talk).
 
+### Progressive images (IMAGE_PROGRESSIVE = 4)
+
+The payload holds the same picture at increasing sizes, smallest first, sent uncompressed so payload offsets equal
+wire offsets:
+
+```
+level count n (1..4) | n x length u16 | level 0 WebP | level 1 WebP ...
+```
+
+The sender adds a preview about 1/8 of the long edge at the minimum quality (typically 100-250 bytes) when that
+costs at most a third of the picture. The receiver shows the preview as soon as its chunks are in, then draws the
+gap-free start of the full level over it (Android 9+ decodes incomplete WebP row by row), so the picture sharpens
+from the top while chunks arrive.
+
 ## 9. Android audio path (`core:audio`)
 
 * Capture: `AudioRecord` at 48 kHz mono 16-bit, `UNPROCESSED` source when the device reports support, else
@@ -180,3 +195,34 @@ Sender                                   Receiver
   cable when a wired/USB input and output are both present. The chosen devices are set as preferred devices.
 * `TransceiverService` is a foreground service (`microphone|mediaPlayback`) that owns the engine and the
   `LinkController`, so transfers continue with the screen off.
+
+## 10. Stations and link test
+
+### STATION frame (type 5)
+
+With a callsign set, every burst (data, poll, NACK, ACK, link test) starts with one STATION frame carrying the
+burst's SessionId. It is in clear on purpose: amateur rules require station identification.
+
+```
+flags u8 (bit 0 = broadcast) | source length s (0..10) | source ASCII | destination length d (0..10, 0 = all) | destination ASCII
+```
+
+Callsigns are upper case `A-Z 0-9 / -`, at most 10 characters. A receiver whose callsign differs from a non-empty
+destination drops the session (no NACK, no ACK, nothing shown). A session with no STATION frame, or an empty
+destination, is for everyone. NACK and ACK bursts carry the receiver's callsign with the sender as destination, so
+the sender learns who confirmed.
+
+### Link test (PROBE = 6, PROBE_REPORT = 7)
+
+The tester sends three bursts back to back: FAST with 6, STANDARD with 4 and ROBUST with 2 PROBE frames
+(P = 48, parity 20%, about 25 s in all). PROBE payload: `profile id | index | count | filler`.
+
+After the turnaround the receiver answers with one PROBE_REPORT frame (ROBUST):
+
+```
+version u8 (= 1) | entries u8 | entries x (profile id, sent, received, repaired, corrected bytes u16, SNR i8 in 0.5 dB, 127 = not heard)
+```
+
+Both sides suggest the fastest profile whose probes all arrived at or above its SNR floor (FAST 6 dB,
+STANDARD 0 dB), with parity `2 * ceil(2 * errors per frame + 1)` bytes, rounded up to 5% and kept within 20..50%;
+otherwise ROBUST at 50%. The tester gives up after twice the response timeout with no report.

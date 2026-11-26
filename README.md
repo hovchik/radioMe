@@ -16,6 +16,12 @@ The air protocol (frame layout, tone tables, FEC parameters) is in [docs/PROTOCO
 | `feature:transceiver` | Phase 4 | Compose UI: radio dashboard (level, SNR, live chunk map, FEC and loss stats, correction requests), text and image composer with exact size and air time, history, settings (DataStore) |
 | `app`                 | Phase 4 | Application shell: Hilt wiring, Room, the service's dependencies, permissions, launcher icon |
 
+## Features
+
+* Text, images (with an early preview that sharpens as chunks arrive) and one-tap quick messages.
+* Station callsign on every burst; messages to one station or to all, with confirmations by callsign.
+* Two-phone link test that measures each profile and suggests profile and parity.
+
 ## Build and test
 
 Requires JDK 17+. The Android modules (`core:audio`, `data`, `feature:transceiver`, `app`) are included only when an Android SDK is found

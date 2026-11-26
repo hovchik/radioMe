@@ -87,3 +87,19 @@ class AndroidImageCodec(context: Context) : ImageCodec {
 
 /** Decode received / prepared WebP bytes for display. Null if the bytes are not an image. */
 fun decodeImage(bytes: ByteArray): Bitmap? = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+
+/**
+ * Decode the start of a WebP whose tail has not arrived yet: the rows that are there, the rest transparent.
+ * Needs Android 9 (ImageDecoder); null on older versions or when not even the header is readable.
+ */
+fun decodePartialImage(bytes: ByteArray): Bitmap? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+    return try {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes))) { decoder, _, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.setOnPartialImageListener { true }
+        }
+    } catch (e: Exception) {
+        null
+    }
+}

@@ -16,7 +16,6 @@ import com.radiome.core.protocol.session.ReceiverSnapshot
 import com.radiome.core.protocol.session.SessionHeader
 import com.radiome.core.protocol.session.TransferOptions
 
-/** Options for NACK / ACK / poll bursts. */
 /**
  * Options for NACK / ACK / poll bursts. A whole correction request always fits one burst
  * (255 frames x 360 chunks per bitmap frame > 65535 chunks), so the sender never acts on half a NACK.
@@ -155,7 +154,10 @@ class SenderSession(val transfer: OutgoingTransfer, private val arq: ArqConfig) 
         if (polls > arq.maxPolls) return fail("no response from receiver")
         phase = SenderPhase.TRANSMITTING
         val opts = controlOptions(arq)
-        val bursts = Packetizer.bursts(listOf(transfer.headerFrame), opts.copy(chunkPayloadSize = transfer.options.chunkPayloadSize))
+        val bursts = Packetizer.bursts(
+            listOf(transfer.headerFrame),
+            opts.copy(chunkPayloadSize = transfer.options.chunkPayloadSize, station = transfer.options.station),
+        )
         return SenderAction.Transmit(bursts, listOf(Packetizer.HEADER_CHUNK), arq.controlProfile, isPoll = true)
     }
 

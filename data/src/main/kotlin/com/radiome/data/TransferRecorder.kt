@@ -23,7 +23,7 @@ class TransferRecorder(
     fun send(payload: Payload, options: TransferOptions = TransferOptions()): Int {
         val sid = link.send(payload, options)
         val chunks = link.transfers.value[sid]?.totalChunks ?: 0
-        repository.recordOutgoing(sid, payload, chunks, options.profile.name)
+        repository.recordOutgoing(sid, payload, chunks, options.profile.name, options.station?.destination)
         return sid
     }
 
@@ -31,7 +31,7 @@ class TransferRecorder(
         launch {
             link.events.collect { e ->
                 when (e) {
-                    is LinkEvent.MessageReceived -> repository.markReceived(e.sessionId, e.payload)
+                    is LinkEvent.MessageReceived -> repository.markReceived(e.sessionId, e.payload, e.from)
                     is LinkEvent.CorrectionsNeeded -> repository.setIncomingStatus(e.sessionId, TransferStatus.INCOMPLETE)
                     is LinkEvent.Delivered -> repository.setOutgoingStatus(e.sessionId, TransferStatus.DELIVERED)
                     is LinkEvent.Failed -> {

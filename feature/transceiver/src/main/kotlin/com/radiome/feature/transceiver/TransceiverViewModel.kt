@@ -7,6 +7,7 @@ import com.radiome.core.protocol.image.ImagePipeline
 import com.radiome.core.protocol.image.ImagePreset
 import com.radiome.core.protocol.image.PreparedImage
 import com.radiome.core.protocol.image.RasterImage
+import com.radiome.core.protocol.link.LinkEvent
 import com.radiome.core.protocol.payload.CompressionMode
 import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.AirtimeEstimator
@@ -96,6 +97,60 @@ class TransceiverViewModel @Inject constructor(
     val historyItems: StateFlow<List<TransferRecord>> =
         history.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val _heard = MutableStateFlow<List<HeardStation>>(emptyList())
+    /** Stations heard on the air (from their STATION frames), newest first. */
+    val heardStations: StateFlow<List<HeardStation>> = _heard.asStateFlow()
+
+    private val _linkTest = MutableStateFlow(LinkTestUi())
+    val linkTest: StateFlow<LinkTestUi> = _linkTest.asStateFlow()
+
+    /** Probe bursts to the station in the To field (or anyone, when it is blank); the result shows on the dashboard. */
+    fun startLinkTest() = viewModelScope.launch {
+        if (_linkTest.value.running) return@launch
+        warnIfMuted()
+        val sid = client.startLinkTest(_compose.value.to.ifBlank { null })
+        if (sid == null) {
+            _messages.trySend("Turn the radio on first.")
+        } else {
+            _linkTest.value = LinkTestUi(running = true, sessionId = sid)
+        }
+    }
+
+    /** Make the link test's suggestion the default profile and parity, and use it in the composer. */
+    fun applyLinkTestRecommendation() {
+        val r = _linkTest.value.recommendation ?: return
+        updateSettings { it.copy(defaultProfile = r.profile, parityPercent = r.parityPercent) }
+        onProfileChange(r.profile)
+        _messages.trySend("Now sending ${Presenters.recommendationLabel(r)} by default.")
+    }
+
+    fun dismissLinkTest() {
+        _linkTest.value = LinkTestUi()
+    }
+
+    private fun onLinkEvent(e: LinkEvent) {
+        when (e) {
+            is LinkEvent.StationHeard -> _heard.update { Presenters.heard(it, e.callsign, clock(), e.snrDb) }
+            is LinkEvent.LinkTestReported -> {
+                val ours = _linkTest.value.sessionId == e.sessionId && !e.measuredHere
+                // Somebody else's test that we measured shows too, unless our own test is still running.
+                if (ours || (e.measuredHere && !_linkTest.value.running)) {
+                    _linkTest.value = LinkTestUi(
+                        sessionId = e.sessionId,
+                        report = e.report,
+                        recommendation = e.report.recommend(),
+                        peer = e.peer,
+                        measuredHere = e.measuredHere,
+                    )
+                }
+            }
+            is LinkEvent.LinkTestFailed -> if (_linkTest.value.sessionId == e.sessionId) {
+                _linkTest.value = LinkTestUi(sessionId = e.sessionId, error = "No report came back. Is the other station listening?")
+            }
+            else -> Unit
+        }
+    }
+
     fun startListening() = client.startListening()
 
     fun stopListening() {
@@ -135,6 +190,23 @@ class TransceiverViewModel @Inject constructor(
         _compose.update { it.copy(draft = text, textEstimate = estimate(text, it.profile)) }
     }
 
+    /** Addressee for texts, images and link tests. Blank sends to every station. */
+    fun onToChange(to: String) {
+        _compose.update { it.copy(to = to.uppercase().take(10)) }
+    }
+
+    /** One-tap preset: goes out right away with the chosen profile and addressee, leaving the draft alone. */
+    fun sendQuickMessage(text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            warnIfMuted()
+            val c = _compose.value
+            if (client.send(Payload.text(text), settings.value.transferOptions(c.profile, c.to)) == null) {
+                _messages.trySend("Turn the radio on first.")
+            }
+        }
+    }
+
     private var profileChosen = false
 
     fun onProfileChange(profile: ModemProfile) {
@@ -152,7 +224,7 @@ class TransceiverViewModel @Inject constructor(
         viewModelScope.launch {
             _compose.update { it.copy(sending = true) }
             warnIfMuted()
-            val sid = client.send(Payload.text(c.draft), settings.value.transferOptions(c.profile))
+            val sid = client.send(Payload.text(c.draft), settings.value.transferOptions(c.profile, c.to))
             if (sid == null) {
                 _messages.trySend("Turn the radio on first.")
                 _compose.update { it.copy(sending = false) }
@@ -184,7 +256,14 @@ class TransceiverViewModel @Inject constructor(
     fun onImagePresetChange(preset: ImagePreset) {
         _compose.update { it.copy(image = it.image?.copy(preset = preset)) }
         viewModelScope.launch {
-            settingsRepository.update { it.copy(imageMaxEdge = preset.maxEdge, imageQuality = preset.quality, imageGrayscale = preset.grayscale) }
+            settingsRepository.update {
+                it.copy(
+                    imageMaxEdge = preset.maxEdge,
+                    imageQuality = preset.quality,
+                    imageGrayscale = preset.grayscale,
+                    imageProgressive = preset.progressive,
+                )
+            }
         }
         prepareImage()
     }
@@ -229,7 +308,7 @@ class TransceiverViewModel @Inject constructor(
         if (c.sending || c.image?.busy == true) return
         viewModelScope.launch {
             _compose.update { it.copy(sending = true) }
-            val options = settings.value.transferOptions(c.profile).copy(compression = CompressionMode.NEVER)
+            val options = settings.value.transferOptions(c.profile, c.to).copy(compression = CompressionMode.NEVER)
             warnIfMuted()
             val sid = client.send(p.payload, options)
             _compose.update { it.copy(sending = false) }
@@ -244,6 +323,7 @@ class TransceiverViewModel @Inject constructor(
             val old = settings.value
             val new = settingsRepository.update(change)
             client.applyLive(new.routePreference, new.outputGain)
+            if (new.callsign != old.callsign) client.setCallsign(new.callsign)
             if (client.running.value && new.needsLinkRestart(old)) _restartPending.value = true
             _compose.update { it.copy(textEstimate = estimate(it.draft, it.profile)) }
         }
@@ -259,6 +339,7 @@ class TransceiverViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             client.events.collect { e ->
+                onLinkEvent(e)
                 Presenters.eventMessage(e, settings.value.autoNack)?.let { _messages.trySend(it) }
             }
         }

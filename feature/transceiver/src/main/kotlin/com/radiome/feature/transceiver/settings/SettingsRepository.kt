@@ -72,6 +72,9 @@ class SettingsRepository(
             imageMaxEdge = enumOr(this[IMAGE_EDGE], d.imageMaxEdge),
             imageQuality = this[IMAGE_QUALITY] ?: d.imageQuality,
             imageGrayscale = this[IMAGE_GRAY] ?: d.imageGrayscale,
+            imageProgressive = this[IMAGE_PROGRESSIVE] ?: d.imageProgressive,
+            callsign = this[CALLSIGN] ?: d.callsign,
+            quickMessages = this[QUICK]?.split(QUICK_SEPARATOR) ?: d.quickMessages,
         ).sanitized()
     }
 
@@ -91,6 +94,9 @@ class SettingsRepository(
         this[IMAGE_EDGE] = s.imageMaxEdge.name
         this[IMAGE_QUALITY] = s.imageQuality
         this[IMAGE_GRAY] = s.imageGrayscale
+        this[IMAGE_PROGRESSIVE] = s.imageProgressive
+        this[CALLSIGN] = s.callsign
+        this[QUICK] = s.quickMessages.joinToString(QUICK_SEPARATOR)
     }
 
     private companion object {
@@ -108,6 +114,10 @@ class SettingsRepository(
         val IMAGE_EDGE = stringPreferencesKey("image_max_edge")
         val IMAGE_QUALITY = intPreferencesKey("image_quality")
         val IMAGE_GRAY = booleanPreferencesKey("image_grayscale")
+        val IMAGE_PROGRESSIVE = booleanPreferencesKey("image_progressive")
+        val CALLSIGN = stringPreferencesKey("callsign")
+        val QUICK = stringPreferencesKey("quick_messages")
+        const val QUICK_SEPARATOR = "\n"
 
         inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
             name?.let { n -> enumValues<E>().firstOrNull { it.name == n } } ?: default

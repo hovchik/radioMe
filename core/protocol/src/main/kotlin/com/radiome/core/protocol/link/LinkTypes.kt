@@ -1,6 +1,7 @@
 package com.radiome.core.protocol.link
 
 import com.radiome.core.dsp.modem.ModemProfile
+import com.radiome.core.protocol.image.ImagePreview
 import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.ChunkState
 import com.radiome.core.protocol.session.ReceiverSnapshot
@@ -53,6 +54,12 @@ data class TransferTelemetry(
     val snrDb: Double,
     val startedAtMs: Long,
     val updatedAtMs: Long,
+    /** The other station: the sender of an incoming transfer, the addressee of an outgoing one (null = all). */
+    val peer: String? = null,
+    /** Callsigns that confirmed an outgoing transfer. */
+    val ackedBy: List<String> = emptyList(),
+    /** What can be shown so far of an incoming progressive image. */
+    val preview: ImagePreview? = null,
 )
 
 sealed interface LinkEvent {
@@ -65,9 +72,25 @@ sealed interface LinkEvent {
     data class Transmitted(override val sessionId: Int, val chunks: List<Int>, val profile: ModemProfile, val kind: Kind) : LinkEvent {
         enum class Kind { INITIAL, REPAIR, POLL }
     }
-    data class MessageReceived(override val sessionId: Int, val payload: Payload) : LinkEvent
+    /** [from] and [to] come from the sender's STATION frame (null when it sent none; [to] null = all stations). */
+    data class MessageReceived(override val sessionId: Int, val payload: Payload, val from: String? = null, val to: String? = null) : LinkEvent
     data class AckSent(override val sessionId: Int) : LinkEvent
-    data class Delivered(override val sessionId: Int) : LinkEvent
+    /** [by] is the confirming station's callsign, when it identified itself. */
+    data class Delivered(override val sessionId: Int, val by: String? = null) : LinkEvent
+    /** A STATION frame was decoded: [callsign] is on the air. */
+    data class StationHeard(override val sessionId: Int, val callsign: String, val snrDb: Double) : LinkEvent
+    data class LinkTestStarted(override val sessionId: Int) : LinkEvent
+    /**
+     * Link test measurements. [measuredHere] is true on the station that received the probes (it measured them and
+     * sends the report back), false on the station that ran the test (it heard the report from [peer]).
+     */
+    data class LinkTestReported(
+        override val sessionId: Int,
+        val report: LinkTestReport,
+        val peer: String?,
+        val measuredHere: Boolean,
+    ) : LinkEvent
+    data class LinkTestFailed(override val sessionId: Int, val reason: String) : LinkEvent
     data class Failed(override val sessionId: Int, val reason: String) : LinkEvent
     /**
      * Playing a transmission threw. [sessionId] is [LinkController.TEST_TONE_SESSION] for a test tone.

@@ -94,6 +94,12 @@ class ServiceTransceiverClient(
         }
     }
 
+    override fun setCallsign(callsign: String) {
+        service.value?.setCallsign(callsign)
+    }
+
+    override suspend fun startLinkTest(to: String?): Int? = service.value?.onLink { it.startLinkTest(to) }
+
     override fun restartLink() {
         service.value?.restartLink()
     }

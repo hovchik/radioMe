@@ -82,7 +82,7 @@ class RoomStoreTest {
     fun historyRecordsOutgoingAndIncoming() = runBlocking {
         val repo = TransferRepository(db) { clock }
         val store = RoomSessionStore(db) { clock }
-        repo.recordOutgoing(11, Payload.text("hello radio"), 1, "STANDARD")
+        repo.recordOutgoing(11, Payload.text("hello radio"), 1, "STANDARD", peer = "EK2B")
         repo.setOutgoingStatus(11, TransferStatus.DELIVERED)
 
         val transfer = Packetizer.packetize(image, 22)
@@ -90,7 +90,7 @@ class RoomStoreTest {
         transfer.allFrames().forEach { tracker.accept(it, CodewordStatus.OK, 0) }
         store.save(tracker.snapshot(0))
         clock += 10
-        repo.markReceived(22, image)
+        repo.markReceived(22, image, from = "EK1A")
 
         val history = repo.observeHistory().first()
         assertEquals(2, history.size)
@@ -98,7 +98,9 @@ class RoomStoreTest {
         assertEquals(Direction.INCOMING, incoming.direction)
         assertEquals(TransferStatus.COMPLETE, incoming.status)
         assertArrayEquals(image.bytes, incoming.payload)
+        assertEquals("EK1A", incoming.peer)
         val outgoing = history.last()
+        assertEquals("EK2B", outgoing.peer)
         assertEquals(TransferStatus.DELIVERED, outgoing.status)
         assertEquals("hello radio", outgoing.text)
     }

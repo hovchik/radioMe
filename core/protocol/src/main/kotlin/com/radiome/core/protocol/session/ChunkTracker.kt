@@ -109,6 +109,16 @@ class ChunkTracker(val sessionId: Int) {
         return out
     }
 
+    /** True when every wire byte in [from, until) has arrived (always false before the HEADER frame). */
+    fun hasBytes(from: Int, until: Int): Boolean {
+        val h = header ?: return false
+        if (from >= until) return true
+        if (from < 0 || until > h.wireLength) return false
+        val p = h.chunkPayloadSize
+        for (c in from / p..(until - 1) / p) if (c !in chunks) return false
+        return true
+    }
+
     fun snapshot(repairRounds: Int): ReceiverSnapshot =
         ReceiverSnapshot(sessionId, totalChunks, header, HashMap(chunks), HashSet(repaired), fecCorrectedBytes, repairRounds)
 
