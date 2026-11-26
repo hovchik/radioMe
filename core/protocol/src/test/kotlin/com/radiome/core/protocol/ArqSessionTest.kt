@@ -115,3 +115,28 @@ class ControlBurstTest {
         assertEquals(1, bursts.size, "${frames.size} NACK frames")
     }
 }
+
+class SessionIdReuseTest {
+    @Test
+    fun `a different transfer with a reused id is detected`() {
+        val a = Packetizer.packetize(Payload(ContentType.BINARY, Random(1).nextBytes(500)), 42)
+        val b = Packetizer.packetize(Payload(ContentType.BINARY, Random(2).nextBytes(500)), 42)
+        val c = Packetizer.packetize(Payload(ContentType.BINARY, Random(3).nextBytes(900)), 42)
+        val rs = ReceiverSession(42)
+        a.allFrames().forEach { rs.onFrame(it, CodewordStatus.OK, 0) }
+        assertEquals(false, rs.conflictsWith(a.dataFrames[0]))
+        assertEquals(false, rs.conflictsWith(a.headerFrame))
+        assertEquals(true, rs.conflictsWith(b.headerFrame), "same size, different content")
+        assertEquals(true, rs.conflictsWith(c.dataFrames[0]), "different chunk count")
+    }
+
+    @Test
+    fun `restored complete session is confirmed but not delivered twice`() {
+        val t = Packetizer.packetize(Payload.text("hello"), 5)
+        val rs = ReceiverSession(5)
+        t.allFrames().forEach { rs.onFrame(it, CodewordStatus.OK, 0) }
+        assertTrue((rs.onOverEnded() as ReceiverAction.Completed).firstTime)
+        val restored = ReceiverSession.restore(rs.snapshot())
+        assertEquals(false, (restored.onOverEnded() as ReceiverAction.Completed).firstTime)
+    }
+}

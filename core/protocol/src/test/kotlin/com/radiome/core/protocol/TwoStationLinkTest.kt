@@ -6,6 +6,8 @@ import com.radiome.core.dsp.sim.ChannelConfig
 import com.radiome.core.dsp.sim.Dropout
 import com.radiome.core.protocol.arq.ArqConfig
 import com.radiome.core.protocol.link.Direction
+import com.radiome.core.protocol.link.InMemorySessionStore
+import com.radiome.core.protocol.link.SessionStore
 import com.radiome.core.protocol.link.LinkController
 import com.radiome.core.protocol.link.LinkEvent
 import com.radiome.core.protocol.payload.ContentType
@@ -27,8 +29,14 @@ import kotlin.time.Duration.Companion.minutes
 class TwoStationLinkTest {
     private class Station(val link: LinkController, val events: MutableList<LinkEvent>)
 
-    private fun TestScope.station(air: SimulatedAir, name: String, arq: ArqConfig, seed: Int): Station {
-        val link = LinkController(air.station(name), backgroundScope, arq, random = Random(seed))
+    private fun TestScope.station(
+        air: SimulatedAir,
+        name: String,
+        arq: ArqConfig,
+        seed: Int,
+        store: SessionStore = InMemorySessionStore(),
+    ): Station {
+        val link = LinkController(air.station(name), backgroundScope, arq, store = store, random = Random(seed))
         val events = ArrayList<LinkEvent>()
         backgroundScope.launch { link.events.collect { events += it } }
         link.start()
@@ -143,5 +151,35 @@ class TwoStationLinkTest {
         assertEquals(photo, got.payload)
         awaitEvent(a, 30) { it is LinkEvent.Delivered }
         assertEquals(2, b.events.count { it is LinkEvent.NackSent }, "B re-sent its NACK after the poll")
+    }
+
+    @Test
+    fun `after a receiver restart the stored chunks are kept and only the rest is requested`() = runTest(timeout = 5.minutes) {
+        val air = SimulatedAir().also { it.start(backgroundScope) }
+        air.channel = { from, to, idx ->
+            when {
+                from == "A" && idx == 0 -> ChannelConfig(snrDb = 12.0, dropouts = listOf(Dropout(6_000.0, 1_500.0)))
+                from == "A" && to == "B1" && idx > 0 -> null // B1 is "dead" after the first over
+                else -> ChannelConfig(snrDb = 12.0, seed = idx.toLong())
+            }
+        }
+        val store = InMemorySessionStore()
+        val a = station(air, "A", ArqConfig(responseTimeoutMs = 6000), 9)
+        // B1 receives the first over but never answers (manual NACK), then "the app restarts" as B2 on the same store.
+        val b1 = station(air, "B1", ArqConfig(autoNack = false), 10, store)
+        delay(500)
+        val photo = image(1400)
+        val sid = a.link.send(photo, TransferOptions(profile = ModemProfile.FAST))
+        val need = awaitEvent(b1, 90) { it is LinkEvent.CorrectionsNeeded } as LinkEvent.CorrectionsNeeded
+        assertTrue(need.missing.isNotEmpty())
+
+        val b2 = station(air, "B2", ArqConfig(), 11, store)
+        // A hears nothing, polls with its header; B2 restores the stored session and asks only for what is missing.
+        val nack = awaitEvent(b2, 60) { it is LinkEvent.NackSent } as LinkEvent.NackSent
+        assertEquals(sid, nack.sessionId)
+        assertEquals(need.missing, nack.missing)
+        val got = awaitEvent(b2, 120) { it is LinkEvent.MessageReceived } as LinkEvent.MessageReceived
+        assertEquals(photo, got.payload)
+        awaitEvent(a, 30) { it is LinkEvent.Delivered }
     }
 }

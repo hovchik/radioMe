@@ -1,5 +1,6 @@
 package com.radiome.data
 
+import com.radiome.core.protocol.arq.SenderPhase
 import com.radiome.core.protocol.link.Direction
 import com.radiome.core.protocol.link.LinkController
 import com.radiome.core.protocol.link.LinkEvent
@@ -46,6 +47,10 @@ class TransferRecorder(
                 for (t in map.values) {
                     if (t.direction == Direction.INCOMING && t.phase == "COMPLETE") continue
                     repository.applyTelemetry(t)
+                    // cancel() has no event of its own; the sender phase is the signal.
+                    if (t.direction == Direction.OUTGOING && t.phase == SenderPhase.CANCELLED.name) {
+                        repository.setOutgoingStatus(t.sessionId, TransferStatus.CANCELLED)
+                    }
                 }
             }
         }

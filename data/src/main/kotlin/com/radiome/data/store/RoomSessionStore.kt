@@ -23,7 +23,9 @@ class RoomSessionStore(
     override fun save(snapshot: ReceiverSnapshot) {
         db.runInTransaction {
             val t = now()
+            // A reused 16-bit id that describes different content starts a new row; the old history entry stays.
             val existing = dao.latest(snapshot.sessionId, Direction.INCOMING.name, t - TransferRepository.RECENT_WINDOW_MS)
+                ?.takeIf { it.isSameTransferAs(snapshot) }
             val headerBlob = snapshot.header?.encode(HEADER_CAPACITY)
             val base = existing ?: TransferEntity(
                 sessionId = snapshot.sessionId,
@@ -61,6 +63,14 @@ class RoomSessionStore(
                 snapshot.chunks.map { (index, data) -> ChunkEntity(id, index, data, index in snapshot.repairedChunks) },
             )
         }
+    }
+
+    private fun TransferEntity.isSameTransferAs(s: ReceiverSnapshot): Boolean {
+        val total = s.totalChunks
+        if (totalChunks > 0 && total != null && totalChunks != total) return false
+        val stored = headerBlob?.let { SessionHeader.decode(it) } ?: return true
+        val incoming = s.header ?: return true
+        return stored.crc32 == incoming.crc32 && stored.wireLength == incoming.wireLength && stored.contentType == incoming.contentType
     }
 
     override fun load(sessionId: Int): ReceiverSnapshot? {

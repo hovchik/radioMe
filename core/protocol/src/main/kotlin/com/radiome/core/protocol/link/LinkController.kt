@@ -1,6 +1,7 @@
 package com.radiome.core.protocol.link
 
 import com.radiome.core.dsp.framing.BurstCodec
+import com.radiome.core.dsp.framing.Frame
 import com.radiome.core.dsp.framing.FrameType
 import com.radiome.core.dsp.framing.NackCodec
 import com.radiome.core.dsp.modem.DemodTelemetry
@@ -196,11 +197,7 @@ class LinkController(
             when (f.type) {
                 FrameType.DATA, FrameType.HEADER -> {
                     if (f.sessionId in senders) continue
-                    val rs = receivers.getOrPut(f.sessionId) {
-                        startedAt[f.sessionId] = nowMs()
-                        emit(LinkEvent.ReceiveStarted(f.sessionId, f.totalChunks))
-                        ReceiverSession(f.sessionId)
-                    }
+                    val rs = receiverFor(f)
                     if (rs.onFrame(f, r.status, r.correctedBytes)) store.save(rs.snapshot())
                     pendingOverEnd += f.sessionId
                     lastSnr[f.sessionId] = raw.snrDb
@@ -222,6 +219,22 @@ class LinkController(
             awaiting.remove(sid)
             onSenderAction(s, s.onAck())
         }
+    }
+
+    /**
+     * The receiver session for [f]: the one in memory, else a partial transfer persisted before a restart (so a
+     * repair burst after a restart merges into the chunks already stored), else a new one. A session whose chunk
+     * count or header does not match the frame is a reused id for a different transfer and is replaced.
+     */
+    private fun receiverFor(f: Frame): ReceiverSession {
+        receivers[f.sessionId]?.let { if (!it.conflictsWith(f)) return it }
+        val restored = store.load(f.sessionId)?.let(ReceiverSession::restore)?.takeUnless { it.conflictsWith(f) }
+        val rs = restored ?: ReceiverSession(f.sessionId)
+        receivers[f.sessionId] = rs
+        pendingOverEnd.remove(f.sessionId)
+        startedAt[f.sessionId] = nowMs()
+        if (restored == null) emit(LinkEvent.ReceiveStarted(f.sessionId, f.totalChunks))
+        return rs
     }
 
     private fun onQuiet(samples: Long) {

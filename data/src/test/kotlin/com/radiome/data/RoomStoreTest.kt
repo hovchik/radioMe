@@ -102,4 +102,31 @@ class RoomStoreTest {
         assertEquals(TransferStatus.DELIVERED, outgoing.status)
         assertEquals("hello radio", outgoing.text)
     }
+
+    @Test
+    fun reusedSessionIdForDifferentContentStartsANewRow() {
+        val store = RoomSessionStore(db) { clock }
+        val repo = TransferRepository(db) { clock }
+        val first = Packetizer.packetize(image, 99)
+        val t1 = ChunkTracker(99)
+        first.allFrames().forEach { t1.accept(it, CodewordStatus.OK, 0) }
+        store.save(t1.snapshot(0))
+        repo.markReceived(99, image)
+        clock += 60_000
+
+        val other = Payload(ContentType.IMAGE_WEBP, Random(8).nextBytes(600), "other.webp")
+        val second = Packetizer.packetize(other, 99)
+        val t2 = ChunkTracker(99)
+        t2.accept(second.headerFrame, CodewordStatus.OK, 0)
+        t2.accept(second.dataFrames[0], CodewordStatus.OK, 0)
+        store.save(t2.snapshot(0))
+
+        val history = runBlocking { repo.observeHistory().first() }
+        assertEquals(2, history.size)
+        assertEquals(TransferStatus.COMPLETE, history.last().status)
+        assertArrayEquals(image.bytes, history.last().payload)
+        val resumed = store.load(99)!!
+        assertEquals("other.webp", resumed.header!!.name)
+        assertArrayEquals(second.dataFrames[0].payload, resumed.chunks.getValue(0))
+    }
 }
