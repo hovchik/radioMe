@@ -166,4 +166,25 @@ class RoomStoreTest {
         assertTrue(row.encrypted)
         assertTrue(row.text!!.contains("no group key set"))
     }
+
+    @Test
+    fun openedMessageKeepsItsTypeWhenTheHeaderIsHeardAgain() {
+        val store = RoomSessionStore(db) { clock }
+        val repo = TransferRepository(db) { clock }
+        val sealed = Payload(ContentType.ENCRYPTED, Random(5).nextBytes(120))
+        val transfer = Packetizer.packetize(sealed, 0x0E0E)
+        val tracker = ChunkTracker(0x0E0E)
+        tracker.accept(transfer.headerFrame, CodewordStatus.OK, 0)
+        for (f in transfer.dataFrames) tracker.accept(f, CodewordStatus.OK, 0)
+        store.save(tracker.snapshot(0))
+        repo.markReceived(0x0E0E, image, from = "EK1A", encrypted = true)
+        // The ACK was lost, so the sender polls with its header and the receiver saves the session again.
+        clock += 1000
+        store.save(tracker.snapshot(0))
+
+        val r = runBlocking { repo.observeHistory().first() }.single()
+        assertEquals(ContentType.IMAGE_WEBP, r.contentType)
+        assertEquals("map.webp", r.name)
+        assertTrue(r.encrypted)
+    }
 }

@@ -196,6 +196,12 @@ class TransceiverViewModel @Inject constructor(
         _messages.trySend("Group key removed. Positions can no longer be sent or read.")
     }
 
+    /** The location prompt was answered with a yes: let the running radio keep locating in the background, then send. */
+    fun onLocationPermissionGranted() {
+        client.onLocationGranted()
+        sendPositionNow()
+    }
+
     fun sendPositionNow() = viewModelScope.launch {
         _messages.trySend(Presenters.beaconMessage(beacon.sendNow()))
     }

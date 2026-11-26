@@ -99,6 +99,10 @@ class ServiceTransceiverClient(
         service.value?.setCallsign(callsign)
     }
 
+    override fun onLocationGranted() {
+        service.value?.refreshForegroundTypes()
+    }
+
     override fun setGroupKey(key: GroupKey?) {
         service.value?.setGroupKey(key?.encoded())
     }

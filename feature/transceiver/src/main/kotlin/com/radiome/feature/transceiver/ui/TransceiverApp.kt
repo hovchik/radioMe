@@ -88,7 +88,7 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
     }
     // Location is asked for only when the user wants to send a position; the map itself needs no permission.
     val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
-        if (granted.values.any { it }) viewModel.sendPositionNow()
+        if (granted.values.any { it }) viewModel.onLocationPermissionGranted()
     }
     val sendPosition = {
         val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED

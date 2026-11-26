@@ -152,17 +152,19 @@ fun MapScreen(
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, map) {
+        // This effect's own view: when `map` goes from null to the new view, the old effect must not detach it.
+        val view = map
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> map?.onResume()
-                Lifecycle.Event.ON_PAUSE -> map?.onPause()
+                Lifecycle.Event.ON_RESUME -> view?.onResume()
+                Lifecycle.Event.ON_PAUSE -> view?.onPause()
                 else -> Unit
             }
         }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
-            map?.onDetach()
+            view?.onDetach()
         }
     }
 }

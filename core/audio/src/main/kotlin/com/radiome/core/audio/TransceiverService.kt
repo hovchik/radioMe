@@ -86,6 +86,7 @@ class TransceiverService : Service() {
 
     // Main-thread state.
     private var linkScope: CoroutineScope? = null
+    @Volatile private var lastStatus = "Listening"
     private var dependencies: Dependencies? = null
     private var engine: AndroidAudioEngine? = null
     private var routeMonitor: AudioRouteMonitor? = null
@@ -156,6 +157,15 @@ class TransceiverService : Service() {
         scope.launch { _link.value?.callsign = callsign }
     }
 
+    /**
+     * Location was just granted while the radio runs: enter the foreground again with the location type, so position
+     * beacons keep getting fixes with the screen off. Call from the visible UI (main thread).
+     */
+    fun refreshForegroundTypes() {
+        if (linkScope == null) return
+        startInForeground(notification(lastStatus))
+    }
+
     fun setGroupKey(raw: ByteArray?) {
         scope.launch { _link.value?.groupKey = raw?.let(::GroupKey) }
     }
@@ -194,6 +204,7 @@ class TransceiverService : Service() {
                     LinkState.RECEIVING -> "Receiving"
                     LinkState.TRANSMITTING -> "Transmitting"
                 }
+                lastStatus = text
                 getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
             }
         }

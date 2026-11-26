@@ -42,6 +42,9 @@ interface TransceiverClient {
     /** Group key for end-to-end encryption on the running link (null removes it). */
     fun setGroupKey(key: GroupKey?)
 
+    /** Location access was just granted; the running service takes on the location foreground type. */
+    fun onLocationGranted() {}
+
     /** Start a two-station link test (see [com.radiome.core.protocol.link.LinkTest]). Null when the radio is off. */
     suspend fun startLinkTest(to: String?): Int?
     /** Restart the link so lead-in and ARQ settings take effect. No-op when the radio is off. */
