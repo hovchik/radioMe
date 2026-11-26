@@ -50,7 +50,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -306,10 +305,19 @@ class TransceiverViewModel @Inject constructor(
     val positions: StateFlow<List<StationPosition>> =
         positionHistory.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val trailTicker: Flow<Long> = flow {
+        while (true) {
+            emit(clock())
+            delay(60_000L)
+        }
+    }
+
     /** Recent movement of each station, keyed like [MapGeo.key], for the trails on the map. */
     val trails: StateFlow<Map<String, List<MapGeo.LatLon>>> =
-        positionHistory.observeRecent(MapGeo.TRAIL_WINDOW_MS)
-            .map { MapGeo.trails(it) }
+        // The query's window starts when it is collected; the minute tick keeps dropping points as they age out.
+        combine(positionHistory.observeRecent(MapGeo.TRAIL_WINDOW_MS), trailTicker) { fixes, now ->
+            MapGeo.trails(fixes.filter { now - it.receivedAt <= MapGeo.TRAIL_WINDOW_MS })
+        }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     val groupKey: StateFlow<GroupKey?> = keys.key
