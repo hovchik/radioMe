@@ -22,7 +22,7 @@ The air protocol (frame layout, tone tables, FEC parameters) is in [docs/PROTOCO
 * Text, images (with an early preview that sharpens as chunks arrive) and one-tap quick messages.
 * Station callsign on every burst; messages to one station or to all, with confirmations by callsign.
 * Two-phone link test that measures each profile and suggests profile and parity.
-* End-to-end encrypted GPS position beacons (AES-256-GCM, pre-shared group key) shown on an OpenStreetMap map
+* End-to-end encrypted GPS position beacons (AES-256-GCM, pre-shared group key) shown on an OpenStreetMap map: callsign labels, markers that fade as fixes age, 6-hour trails, distance and bearing from you, a live "my location" dot, and offline map files (MBTiles, GEMF, SQLite, ZIP) with tile downloads that can be turned off
   with an offline tile cache. Optional encryption for all messages. Not for amateur bands.
 * Group mode for messages to all: every receiver's corrections are merged into one repair and each confirmation
   is shown as a delivery receipt. Auto speed picks the profile from recent results; a send queue goes one by one.

@@ -115,6 +115,7 @@ class FakeLocation : LocationSource {
 class FakePositions : PositionHistory {
     val items = MutableStateFlow<List<StationPosition>>(emptyList())
     override fun observe(): Flow<List<StationPosition>> = items
+    override fun observeRecent(windowMs: Long): Flow<List<StationPosition>> = items
     override suspend fun clear() { items.value = emptyList() }
 }
 

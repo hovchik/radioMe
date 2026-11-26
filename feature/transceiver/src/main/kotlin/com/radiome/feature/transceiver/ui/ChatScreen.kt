@@ -114,9 +114,18 @@ fun ChatScreen(
     voiceActions: VoiceActions,
     historyActions: HistoryActions,
     modifier: Modifier = Modifier,
+    /** A conversation another screen asked to open, such as the map's "Message" button. */
+    openPeer: String? = null,
+    onOpenPeerHandled: () -> Unit = {},
 ) {
     // "" is "All stations"; null is the list.
     var open by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(openPeer) {
+        if (openPeer != null) {
+            open = Chat.key(openPeer)
+            onOpenPeerHandled()
+        }
+    }
     val current = open
     if (current == null) {
         ChatList(threads, running, now, actions, onOpen = { peer -> open = Chat.key(peer) }, modifier = modifier)

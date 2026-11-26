@@ -71,6 +71,7 @@ fun TransceiverApp(
     val linkTest by viewModel.linkTest.collectAsStateWithLifecycle()
     val heard by viewModel.heardStations.collectAsStateWithLifecycle()
     val positions by viewModel.positions.collectAsStateWithLifecycle()
+    val trails by viewModel.trails.collectAsStateWithLifecycle()
     val groupKey by viewModel.groupKey.collectAsStateWithLifecycle()
     val keyBusy by viewModel.keyBusy.collectAsStateWithLifecycle()
     val now by viewModel.now.collectAsStateWithLifecycle()
@@ -81,6 +82,7 @@ fun TransceiverApp(
         QueueActions(viewModel::onAutoSpeed, viewModel::queueText, viewModel::queueImage, viewModel::removeQueued)
     }
     var tab by rememberSaveable { mutableStateOf(Tab.RADIO) }
+    var chatToOpen by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
 
@@ -292,13 +294,20 @@ fun TransceiverApp(
                     voiceActions = voiceActions,
                     historyActions = historyActions,
                     modifier = modifier,
+                    openPeer = chatToOpen,
+                    onOpenPeerHandled = { chatToOpen = null },
                 )
                 Tab.MAP -> MapScreen(
                     positions = positions,
+                    trails = trails,
                     hasKey = groupKey != null,
                     fingerprint = groupKey?.fingerprint,
                     now = now,
                     onSendPosition = { sendPosition() },
+                    onMessage = { callsign ->
+                        chatToOpen = callsign
+                        tab = Tab.CHAT
+                    },
                     onClear = { viewModel.clearPositions() },
                     modifier = modifier,
                 )
