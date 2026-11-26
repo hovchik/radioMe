@@ -15,4 +15,11 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew test --console=plain
+      # The runner image ships an Android SDK (ANDROID_HOME), so the Android modules are included here.
+      - run: ./gradlew test assembleDebug --console=plain
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: '**/build/reports/tests/'

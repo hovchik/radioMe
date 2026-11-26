@@ -33,7 +33,21 @@ include(":core:dsp")
 // Phase 2: packetizer, image pipeline, chunk tracking, half-duplex ARQ (pure Kotlin).
 include(":core:protocol")
 
+// Phase 3: Android library modules. They need an Android SDK (ANDROID_HOME / ANDROID_SDK_ROOT or sdk.dir in
+// local.properties) and access to Google Maven, so they are skipped where neither is available and the
+// pure-Kotlin modules still build and test on their own.
+val androidSdkAvailable: Boolean = run {
+    val localProps = file("local.properties")
+    val fromLocal = localProps.exists() && localProps.readLines().any { it.trim().startsWith("sdk.dir") }
+    fromLocal || System.getenv("ANDROID_HOME") != null || System.getenv("ANDROID_SDK_ROOT") != null
+}
+if (androidSdkAvailable) {
+    include(":core:audio")
+    include(":data")
+} else {
+    logger.lifecycle("No Android SDK found: building only the pure-Kotlin modules (:core:dsp, :core:protocol).")
+}
+
 // Later phases (added once their code lands):
-//   :core:audio, :data    (Phase 3, Android library modules)
 //   :feature:transceiver  (Phase 4, Compose UI)
 //   :app                  (Phase 4, application shell + Hilt)

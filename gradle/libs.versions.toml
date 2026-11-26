@@ -2,6 +2,13 @@
 kotlin = "2.3.21"
 junit = "5.14.3"
 coroutines = "1.10.2"
+# Android (Phase 3). Keep agp / ksp in sync with the buildscript block in the root build.gradle.kts.
+agp = "8.13.0"
+ksp = "2.3.6"
+room = "2.7.2"
+robolectric = "4.16.1"
+androidx-test-core = "1.6.1"
+junit4 = "4.13.2"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
@@ -10,6 +17,13 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
+room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
+room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+androidx-test-core = { module = "androidx.test:core", version.ref = "androidx-test-core" }
+junit4 = { module = "junit:junit", version.ref = "junit4" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
