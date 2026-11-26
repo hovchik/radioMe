@@ -27,6 +27,10 @@ class PositionRepository(
 
     fun observeLatest(): Flow<List<StationPosition>> = dao.observeLatest().map { list -> list.map { it.toStation() } }
 
+    /** All fixes stored in the last [windowMs], oldest first. The window starts when the flow is collected. */
+    fun observeRecent(windowMs: Long): Flow<List<StationPosition>> =
+        dao.observeSince(now() - windowMs).map { list -> list.map { it.toStation() } }
+
     /** Returns false when the fix was rejected as stale, replayed or from the future. */
     fun addReceived(callsign: String, p: Position, snrDb: Double?): Boolean {
         val last = dao.lastFixTime(callsign)

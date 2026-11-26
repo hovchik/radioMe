@@ -10,10 +10,14 @@ import kotlinx.coroutines.withContext
 interface PositionHistory {
     /** Latest fix per station, ours included, newest first. */
     fun observe(): Flow<List<StationPosition>>
+
+    /** Every fix of the last [windowMs], oldest first, for the trails on the map. */
+    fun observeRecent(windowMs: Long): Flow<List<StationPosition>>
     suspend fun clear()
 }
 
 class RoomPositionHistory(private val repository: PositionRepository) : PositionHistory {
     override fun observe(): Flow<List<StationPosition>> = repository.observeLatest()
+    override fun observeRecent(windowMs: Long): Flow<List<StationPosition>> = repository.observeRecent(windowMs)
     override suspend fun clear() = withContext(Dispatchers.IO) { repository.clear() }
 }

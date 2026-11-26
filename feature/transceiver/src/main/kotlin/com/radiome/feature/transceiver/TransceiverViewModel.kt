@@ -30,6 +30,7 @@ import com.radiome.feature.transceiver.link.TransceiverClient
 import com.radiome.feature.transceiver.link.TransferHistory
 import com.radiome.feature.transceiver.link.PositionBeacon
 import com.radiome.feature.transceiver.link.PositionHistory
+import com.radiome.feature.transceiver.map.MapGeo
 import com.radiome.feature.transceiver.settings.GroupKeyProvider
 import com.radiome.core.protocol.crypto.GroupKey
 import com.radiome.data.StationPosition
@@ -49,6 +50,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -303,6 +305,12 @@ class TransceiverViewModel @Inject constructor(
     /** Latest decrypted fix per station, ours included. */
     val positions: StateFlow<List<StationPosition>> =
         positionHistory.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Recent movement of each station, keyed like [MapGeo.key], for the trails on the map. */
+    val trails: StateFlow<Map<String, List<MapGeo.LatLon>>> =
+        positionHistory.observeRecent(MapGeo.TRAIL_WINDOW_MS)
+            .map { MapGeo.trails(it) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     val groupKey: StateFlow<GroupKey?> = keys.key
 

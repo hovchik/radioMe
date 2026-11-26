@@ -69,6 +69,7 @@ fun TransceiverApp(
     val linkTest by viewModel.linkTest.collectAsStateWithLifecycle()
     val heard by viewModel.heardStations.collectAsStateWithLifecycle()
     val positions by viewModel.positions.collectAsStateWithLifecycle()
+    val trails by viewModel.trails.collectAsStateWithLifecycle()
     val groupKey by viewModel.groupKey.collectAsStateWithLifecycle()
     val keyBusy by viewModel.keyBusy.collectAsStateWithLifecycle()
     val now by viewModel.now.collectAsStateWithLifecycle()
@@ -258,10 +259,15 @@ fun TransceiverApp(
                 )
                 Tab.MAP -> MapScreen(
                     positions = positions,
+                    trails = trails,
                     hasKey = groupKey != null,
                     fingerprint = groupKey?.fingerprint,
                     now = now,
                     onSendPosition = { sendPosition() },
+                    onMessage = { callsign ->
+                        viewModel.onToChange(callsign)
+                        tab = Tab.RADIO
+                    },
                     onClear = { viewModel.clearPositions() },
                     modifier = modifier,
                 )

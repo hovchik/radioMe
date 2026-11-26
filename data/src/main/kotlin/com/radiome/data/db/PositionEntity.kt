@@ -37,6 +37,10 @@ interface PositionDao {
     @Query("SELECT * FROM positions WHERE id IN (SELECT MAX(id) FROM positions GROUP BY own, callsign) ORDER BY receivedAt DESC")
     fun observeLatest(): Flow<List<PositionEntity>>
 
+    /** Every fix stored since [since] (ms), oldest first: the trails on the map. */
+    @Query("SELECT * FROM positions WHERE receivedAt >= :since ORDER BY fixTimeSec ASC, id ASC")
+    fun observeSince(since: Long): Flow<List<PositionEntity>>
+
     @Query("SELECT MAX(fixTimeSec) FROM positions WHERE callsign = :callsign AND own = 0")
     fun lastFixTime(callsign: String): Long?
 
