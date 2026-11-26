@@ -143,7 +143,7 @@ class RoomStoreTest {
         assertTrue(repo.addReceived("EK1A", Position(40.19, 44.52, timeSec = t - 30), 9.0))
         // A recording of the first beacon played back later.
         assertFalse(repo.addReceived("EK1A", Position(40.18, 44.51, timeSec = t - 60), 9.5))
-        assertFalse(repo.addReceived("EK2B", Position(1.0, 2.0, timeSec = t + 3600), null), "fix from the future")
+        assertFalse("fix from the future", repo.addReceived("EK2B", Position(1.0, 2.0, timeSec = t + 3600), null))
         repo.addOwn("EK9Z", Position(40.0, 44.0, timeSec = t))
 
         val latest = repo.observeLatest().first()
