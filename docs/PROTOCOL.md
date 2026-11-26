@@ -166,3 +166,17 @@ Sender                                   Receiver
 * All timers run on the audio clock (input samples), so the behaviour matches between devices and in tests.
 * Half-duplex guard: captured audio is dropped while transmitting, the demodulator is reset afterwards, and a
   queued burst waits until the channel is quiet (listen before talk).
+
+## 9. Android audio path (`core:audio`)
+
+* Capture: `AudioRecord` at 48 kHz mono 16-bit, `UNPROCESSED` source when the device reports support, else
+  `VOICE_RECOGNITION`. AGC, noise suppression and echo cancellation are switched off on the session if the
+  platform attaches them anyway. Capture runs on its own urgent-audio thread in 50 ms blocks from a fixed pool,
+  so nothing is allocated per block.
+* Playback: `AudioTrack` in streaming mode on a dedicated urgent-audio thread. `play()` returns only after the
+  last sample has actually played, so the link's turnaround timing is accurate.
+* Half-duplex guard: capture is muted while transmitting and for 150 ms after, on top of the link's own guard.
+* Routing: acoustic (built-in mic and speaker) or cable (wired TRRS, USB audio such as Digirig). Auto picks
+  cable when a wired/USB input and output are both present. The chosen devices are set as preferred devices.
+* `TransceiverService` is a foreground service (`microphone|mediaPlayback`) that owns the engine and the
+  `LinkController`, so transfers continue with the screen off.

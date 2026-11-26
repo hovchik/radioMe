@@ -13,6 +13,7 @@ import com.radiome.core.protocol.session.ChunkTracker
 import com.radiome.core.protocol.session.OutgoingTransfer
 import com.radiome.core.protocol.session.Packetizer
 import com.radiome.core.protocol.session.ReceiverSnapshot
+import com.radiome.core.protocol.session.SessionHeader
 import com.radiome.core.protocol.session.TransferOptions
 
 /** Options for NACK / ACK / poll bursts. */
@@ -44,6 +45,23 @@ class ReceiverSession(val sessionId: Int, val tracker: ChunkTracker = ChunkTrack
 
     fun onFrame(frame: Frame, status: CodewordStatus, correctedBytes: Int): Boolean = tracker.accept(frame, status, correctedBytes)
 
+    /**
+     * True when [frame] carries the same 16-bit session id but clearly belongs to a different transfer (ids are
+     * random and get reused, for example after the sender restarts): a different chunk count or a different header.
+     */
+    fun conflictsWith(frame: Frame): Boolean {
+        if (frame.sessionId != sessionId) return false
+        val total = tracker.totalChunks
+        if (total != null && frame.totalChunks > 0 && frame.totalChunks != total) return true
+        if (frame.type == FrameType.HEADER) {
+            val known = tracker.header ?: return false
+            val incoming = SessionHeader.decode(frame.payload) ?: return false
+            return incoming.crc32 != known.crc32 || incoming.wireLength != known.wireLength ||
+                incoming.contentType != known.contentType
+        }
+        return false
+    }
+
     /** The sender's over ended (turnaround elapsed): decide between ACK and NACK. */
     fun onOverEnded(): ReceiverAction {
         tracker.markOverEnded()
@@ -52,11 +70,13 @@ class ReceiverSession(val sessionId: Int, val tracker: ChunkTracker = ChunkTrack
             phase = ReceiverPhase.AWAITING_REPAIR
             return ReceiverAction.NeedsRepair(tracker.missingForNack, tracker.lossPercent)
         }
+        // A session restored from storage can already be COMPLETE: confirm it again, but do not re-deliver it.
+        val firstTime = phase != ReceiverPhase.COMPLETE
         return when (val r = Packetizer.reassemble(tracker.header!!, tracker.chunks(), tracker.totalChunks!!)) {
             is Packetizer.Reassembly.Ok -> {
                 phase = ReceiverPhase.COMPLETE
                 payload = r.payload
-                ReceiverAction.Completed(r.payload, firstTime = true)
+                ReceiverAction.Completed(r.payload, firstTime)
             }
             is Packetizer.Reassembly.Corrupt -> {
                 phase = ReceiverPhase.CORRUPT

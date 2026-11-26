@@ -11,15 +11,19 @@ The air protocol (frame layout, tone tables, FEC parameters) is in [docs/PROTOCO
 |-----------------------|---------|-----------------------------------------------------------------------------|
 | `core:dsp`            | Phase 1 | Pure Kotlin: MFSK modem, chirp sync, Reed-Solomon, interleaver, link frames, radio channel simulator |
 | `core:protocol`       | Phase 2 | Packetizer, DEFLATE, image pipeline, chunk tracker, half-duplex NACK/ARQ, `LinkController` |
-| `core:audio`, `data`  | Phase 3 | AudioRecord/AudioTrack engine, foreground service, Room persistence         |
+| `core:audio`          | Phase 3 | `AudioPort` on AudioRecord (UNPROCESSED) / AudioTrack, half-duplex guard, acoustic vs cable routing, foreground service hosting the link |
+| `data`                | Phase 3 | Room history of transfers and persisted partial chunks (`RoomSessionStore`) |
 | `feature:transceiver` | Phase 4 | Compose UI                                                                  |
 
 ## Build and test
 
-Requires JDK 17+.
+Requires JDK 17+. The Android modules (`core:audio`, `data`) are included only when an Android SDK is found
+(`ANDROID_HOME`, `ANDROID_SDK_ROOT` or `sdk.dir` in `local.properties`); without one, the pure-Kotlin modules
+still build and test. CI builds and tests everything.
 
 ```
-./gradlew test
+./gradlew test            # all unit tests (JVM + Robolectric)
+./gradlew assembleDebug   # Android libraries
 ```
 
 The tests run encode -> modulate -> simulated radio channel (300-3000 Hz band-pass, AWGN, squelch drop-outs,
