@@ -13,9 +13,11 @@ class AirtimeEstimator(private val engine: MfskModemEngine = MfskModemEngine()) 
         val nsym = ReedSolomon.parityFor(k, options.effectiveParityRatio)
         var remaining = frameCount
         var total = 0L
+        val perBurst = options.contentFramesPerBurst
+        val extra = if (options.station != null) 1 else 0
         while (remaining > 0) {
-            val n = minOf(remaining, options.maxFramesPerBurst)
-            total += engine.airtimeMs(PhyHeader(options.profile, options.effectiveInterleaveDepth, k, nsym, n))
+            val n = minOf(remaining, perBurst)
+            total += engine.airtimeMs(PhyHeader(options.profile, options.effectiveInterleaveDepth, k, nsym, n + extra))
             remaining -= n
         }
         return total

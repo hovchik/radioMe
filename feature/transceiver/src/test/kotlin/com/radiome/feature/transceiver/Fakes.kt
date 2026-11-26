@@ -43,6 +43,14 @@ class FakeClient : TransceiverClient {
     override suspend fun cancel(sessionId: Int) = Unit
     override fun applyLive(route: RoutePreference, outputGain: Float) { live = route to outputGain }
     override fun restartLink() { restarts++ }
+    var lastCallsign = ""
+    var linkTests = 0
+    override fun setCallsign(callsign: String) { lastCallsign = callsign }
+    override suspend fun startLinkTest(to: String?): Int? {
+        if (!running.value) return null
+        linkTests++
+        return 0x4321
+    }
     var muted = false
     var testTones = 0
     override suspend fun sendTestTone(): Boolean {

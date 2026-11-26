@@ -35,6 +35,7 @@ class RadioMeApp : Application(), TransceiverService.DependenciesProvider {
             override val audioConfig: AudioEngineConfig = s.audioConfig()
             override val launchIntent: Intent = launch
             override val routePreference: RoutePreference = s.routePreference
+            override val callsign: String = s.callsign
 
             override fun onLinkStarted(link: LinkController, scope: CoroutineScope) = rec.attach(link, scope)
 

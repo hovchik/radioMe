@@ -3,6 +3,11 @@ package com.radiome.feature.transceiver
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.radiome.core.dsp.modem.ModemProfile
 import com.radiome.core.protocol.image.MaxEdge
+import com.radiome.core.protocol.image.ProgressiveImage
+import com.radiome.core.protocol.link.LinkEvent
+import com.radiome.core.protocol.link.LinkTest
+import com.radiome.core.protocol.link.LinkTestReport
+import com.radiome.core.protocol.link.ProbeResult
 import com.radiome.core.protocol.payload.CompressionMode
 import com.radiome.core.protocol.payload.ContentType
 import com.radiome.feature.transceiver.settings.SettingsRepository
@@ -93,7 +98,9 @@ class TransceiverViewModelTest {
         vm.sendImage()
         waitUntil { client.sent.size == 1 }
         val (payload, options) = client.sent.single()
-        assertEquals(ContentType.IMAGE_WEBP, payload.type)
+        // Preview first is on by default: a tiny level, then the picture.
+        assertEquals(ContentType.IMAGE_PROGRESSIVE, payload.type)
+        assertEquals(2, ProgressiveImage.unpack(payload.bytes)!!.size)
         assertEquals(CompressionMode.NEVER, options.compression)
         waitUntil { vm.compose.value.image == null }
     }
@@ -144,5 +151,70 @@ class TransceiverViewModelTest {
         vm.restartLink()
         assertEquals(1, client.restarts)
         assertFalse(vm.restartPending.value)
+    }
+
+    @Test
+    fun callsignAddresseeAndQuickMessagesGoIntoTheTransfer() = runBlocking {
+        client.startListening()
+        vm.updateSettings { it.copy(callsign = "ek1a") }
+        waitUntil { client.lastCallsign == "EK1A" }
+        // The settings state follows the store a moment later; sends read it.
+        waitUntil { vm.settings.value.callsign == "EK1A" }
+        vm.onToChange("ek2b")
+        vm.sendQuickMessage("Need help")
+        waitUntil { client.sent.size == 1 }
+        val (payload, options) = client.sent.single()
+        assertEquals("Need help", payload.asText())
+        assertEquals("EK1A", options.station!!.source)
+        assertEquals("EK2B", options.station!!.destination)
+
+        vm.onToChange("")
+        vm.sendQuickMessage("OK")
+        waitUntil { client.sent.size == 2 }
+        assertNull(client.sent[1].second.station!!.destination)
+    }
+
+    @Test
+    fun heardStationsAreListedNewestFirst() {
+        client.events.tryEmit(LinkEvent.StationHeard(1, "EK1A", 10.0))
+        client.events.tryEmit(LinkEvent.StationHeard(2, "EK2B", 8.0))
+        client.events.tryEmit(LinkEvent.StationHeard(3, "EK1A", 12.0))
+        waitUntil { vm.heardStations.value.size == 2 && vm.heardStations.value.first().callsign == "EK1A" }
+        assertEquals(12.0, vm.heardStations.value.first().snrDb, 0.0)
+    }
+
+    @Test
+    fun linkTestShowsTheReportAndAppliesTheSuggestion() = runBlocking {
+        vm.startLinkTest()
+        assertEquals("Turn the radio on first.", withTimeout(2_000) { vm.messages.first() })
+        client.startListening()
+        vm.startLinkTest()
+        waitUntil { vm.linkTest.value.running }
+        val report = LinkTestReport(
+            listOf(
+                ProbeResult(ModemProfile.FAST, 6, 3, 3, 20, 4.0),
+                ProbeResult(ModemProfile.STANDARD, 4, 4, 1, 2, 5.0),
+                ProbeResult(ModemProfile.ROBUST, 2, 2, 0, 0, 5.0),
+            ),
+        )
+        client.events.tryEmit(LinkEvent.LinkTestReported(0x4321, report, "EK2B", measuredHere = false))
+        waitUntil { vm.linkTest.value.report != null }
+        val ui = vm.linkTest.value
+        assertFalse(ui.running)
+        assertEquals("EK2B", ui.peer)
+        assertEquals(ModemProfile.STANDARD, ui.recommendation!!.profile)
+
+        vm.applyLinkTestRecommendation()
+        waitUntil { settings.settings.value.defaultProfile == ModemProfile.STANDARD && settings.settings.value.parityPercent == 20 }
+        assertEquals(ModemProfile.STANDARD, vm.compose.value.profile)
+        vm.dismissLinkTest()
+        assertFalse(vm.linkTest.value.visible)
+
+        vm.startLinkTest()
+        waitUntil { vm.linkTest.value.running }
+        client.events.tryEmit(LinkEvent.LinkTestFailed(0x4321, "no report"))
+        waitUntil { vm.linkTest.value.error != null }
+        assertEquals(2, client.linkTests)
+        assertTrue(LinkTest.order.isNotEmpty())
     }
 }

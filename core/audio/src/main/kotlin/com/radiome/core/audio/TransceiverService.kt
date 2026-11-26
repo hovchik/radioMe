@@ -55,6 +55,8 @@ class TransceiverService : Service() {
         /** Activity to open when the notification is tapped. */
         val launchIntent: Intent?
         val routePreference: RoutePreference get() = RoutePreference.AUTO
+        /** Station callsign sent at the start of every burst; blank for none. */
+        val callsign: String get() = ""
 
         /**
          * Runs on the link thread right after the controller is created, before the UI can reach it. Coroutines
@@ -146,6 +148,11 @@ class TransceiverService : Service() {
         engine?.outputGain = gain
     }
 
+    /** New callsign for the running link (the next start reads it from the dependencies). */
+    fun setCallsign(callsign: String) {
+        scope.launch { _link.value?.callsign = callsign }
+    }
+
     private fun startLink() {
         if (linkScope != null) return
         val deps = (application as? DependenciesProvider)?.transceiverDependencies() ?: DefaultDependencies
@@ -157,7 +164,9 @@ class TransceiverService : Service() {
         audio.preferredInput = monitor.route.value.input
         audio.preferredOutput = monitor.route.value.output
         audio.startCapture()
-        val controller = LinkController(audio, ls, deps.arqConfig, MfskModemEngine(deps.modemConfig), deps.sessionStore)
+        val controller = LinkController(
+            audio, ls, deps.arqConfig, MfskModemEngine(deps.modemConfig), deps.sessionStore, callsign = deps.callsign,
+        )
 
         linkScope = ls
         dependencies = deps

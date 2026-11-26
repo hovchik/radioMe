@@ -35,6 +35,8 @@ data class TransferEntity(
     val profile: String?,
     val createdAt: Long,
     val updatedAt: Long,
+    /** The other station's callsign: who sent an incoming transfer, who an outgoing one is for (null = all). */
+    val peer: String? = null,
 )
 
 /** A received chunk of an incoming transfer. */

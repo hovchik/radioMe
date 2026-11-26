@@ -69,8 +69,13 @@ class SettingsTest {
         assertEquals(RadioSettings(), repo.load())
 
         val saved = repo.update {
-            it.copy(leadInMs = 950, parityPercent = 40, defaultProfile = ModemProfile.ROBUST, imageMaxEdge = MaxEdge.PX_128, autoNack = false)
+            it.copy(
+                leadInMs = 950, parityPercent = 40, defaultProfile = ModemProfile.ROBUST, imageMaxEdge = MaxEdge.PX_128, autoNack = false,
+                callsign = "ek1a/p", quickMessages = listOf("Copy", " ", "At the hut"), imageProgressive = false,
+            )
         }
+        assertEquals("EK1A/P", saved.callsign)
+        assertEquals(listOf("Copy", "At the hut"), saved.quickMessages)
         assertEquals(950, saved.leadInMs)
         val loaded = repo.load()
         assertEquals(saved, loaded)
@@ -81,5 +86,15 @@ class SettingsTest {
         assertNull(repo.update { it.copy(parityPercent = null) }.parityPercent)
         assertNull(repo.load().parityPercent)
         scope.cancel()
+    }
+
+    @Test
+    fun callsignAndAddresseeMakeTheStationFrame() {
+        assertNull(RadioSettings().transferOptions().station)
+        val o = RadioSettings(callsign = "ek1a").transferOptions(ModemProfile.FAST, to = "ek2b")
+        assertEquals("EK1A", o.station!!.source)
+        assertEquals("EK2B", o.station!!.destination)
+        assertNull(RadioSettings(callsign = "EK1A").transferOptions(to = " ").station!!.destination)
+        assertTrue(RadioSettings().imagePreset().progressive)
     }
 }

@@ -7,7 +7,11 @@ enum class ContentType(val code: Int) {
     TEXT(1),
     IMAGE_WEBP(2),
     BINARY(3),
+    /** Several WebP sizes of one picture, smallest first ([com.radiome.core.protocol.image.ProgressiveImage]). */
+    IMAGE_PROGRESSIVE(4),
     ;
+
+    val isImage: Boolean get() = this == IMAGE_WEBP || this == IMAGE_PROGRESSIVE
 
     companion object {
         fun fromCode(code: Int): ContentType? = entries.firstOrNull { it.code == code }

@@ -7,6 +7,12 @@ enum class FrameType(val code: Int) {
     HEADER(0x2),
     NACK(0x3),
     ACK(0x4),
+    /** Station identification: source callsign and optional destination, first frame of every burst. */
+    STATION(0x5),
+    /** Link-test probe (known filler at minimum parity, one burst per profile). */
+    PROBE(0x6),
+    /** Receiver's measurements of a link test. */
+    PROBE_REPORT(0x7),
     ;
 
     companion object {
@@ -43,7 +49,7 @@ class Frame(
  * ```
  * offset  size  field
  *   0      1    magic        0xA5
- *   1      1    version:4 | frameType:4      (version = 1; DATA=1 HEADER=2 NACK=3 ACK=4)
+ *   1      1    version:4 | frameType:4      (version = 1; DATA=1 HEADER=2 NACK=3 ACK=4 STATION=5 PROBE=6 REPORT=7)
  *   2      2    sessionId    u16
  *   4      2    chunkIndex   u16
  *   6      2    totalChunks  u16

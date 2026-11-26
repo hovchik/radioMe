@@ -7,6 +7,8 @@ import com.radiome.core.dsp.modem.ModemProfile
 import com.radiome.core.protocol.arq.ArqConfig
 import com.radiome.core.protocol.image.ImagePreset
 import com.radiome.core.protocol.image.MaxEdge
+import com.radiome.core.protocol.link.Callsign
+import com.radiome.core.protocol.link.StationInfo
 import com.radiome.core.protocol.session.TransferOptions
 
 /** Everything the user can change, as stored. [sanitized] clamps values read from disk into their legal ranges. */
@@ -31,6 +33,12 @@ data class RadioSettings(
     val imageMaxEdge: MaxEdge = MaxEdge.PX_240,
     val imageQuality: Int = 25,
     val imageGrayscale: Boolean = false,
+    /** Send a small preview level first so the receiver sees the picture early. */
+    val imageProgressive: Boolean = true,
+    /** This station's callsign, sent in clear at the start of every burst. Blank: no identification. */
+    val callsign: String = "",
+    /** One-tap presets on the compose card. */
+    val quickMessages: List<String> = DEFAULT_QUICK_MESSAGES,
 ) {
     fun sanitized(): RadioSettings = copy(
         leadInMs = leadInMs.coerceIn(ModemConfig.MIN_LEAD_IN_MS, ModemConfig.MAX_LEAD_IN_MS),
@@ -40,6 +48,8 @@ data class RadioSettings(
         turnaroundMs = turnaroundMs.coerceIn(MIN_TURNAROUND, MAX_TURNAROUND),
         outputGainPercent = outputGainPercent.coerceIn(MIN_GAIN, 100),
         imageQuality = imageQuality.coerceIn(ImagePreset.MIN_QUALITY, ImagePreset.MAX_QUALITY),
+        callsign = Callsign.normalize(callsign),
+        quickMessages = quickMessages.map { it.trim().take(MAX_QUICK_LENGTH) }.filter { it.isNotEmpty() }.distinct().take(MAX_QUICK_MESSAGES),
     )
 
     fun modemConfig(): ModemConfig = ModemConfig(leadInMs = sanitized().leadInMs)
@@ -57,16 +67,21 @@ data class RadioSettings(
 
     val outputGain: Float get() = sanitized().outputGainPercent / 100f
 
-    fun transferOptions(profile: ModemProfile = defaultProfile): TransferOptions = sanitized().let {
+    /** [to] is the addressee's callsign; null or blank sends to every station. */
+    fun transferOptions(profile: ModemProfile = defaultProfile, to: String? = null): TransferOptions = sanitized().let {
+        val dest = to?.let(Callsign::normalize)?.ifEmpty { null }
         TransferOptions(
             profile = profile,
             chunkPayloadSize = it.chunkPayloadSize,
             parityRatio = it.parityPercent?.let { p -> p / 100.0 },
             interleaveDepth = it.interleaveDepth,
+            station = if (it.callsign.isEmpty() && dest == null) null else StationInfo(it.callsign, dest),
         )
     }
 
-    fun imagePreset(): ImagePreset = sanitized().let { ImagePreset(it.imageMaxEdge, it.imageQuality, it.imageGrayscale) }
+    fun imagePreset(): ImagePreset = sanitized().let {
+        ImagePreset(it.imageMaxEdge, it.imageQuality, it.imageGrayscale, progressive = it.imageProgressive)
+    }
 
     /** True when switching from [old] to this needs the link restarted (lead-in, ARQ timing, audio engine). */
     fun needsLinkRestart(old: RadioSettings): Boolean =
@@ -79,5 +94,8 @@ data class RadioSettings(
         const val MIN_TURNAROUND = 500
         const val MAX_TURNAROUND = 5000
         const val MIN_GAIN = 10
+        const val MAX_QUICK_MESSAGES = 12
+        const val MAX_QUICK_LENGTH = 60
+        val DEFAULT_QUICK_MESSAGES = listOf("OK", "Copy that", "Need help", "At position", "Returning to base", "Stand by")
     }
 }

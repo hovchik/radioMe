@@ -44,6 +44,12 @@ import com.radiome.feature.transceiver.InputLevel
 import com.radiome.feature.transceiver.Presenters
 import com.radiome.feature.transceiver.TransferCard
 import com.radiome.feature.transceiver.image.decodeImage
+import com.radiome.feature.transceiver.image.decodePartialImage
+import com.radiome.core.protocol.image.ImagePreview
+import com.radiome.core.protocol.image.ProgressiveImage
+import com.radiome.core.protocol.payload.ContentType
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 
 /** Horizontal input level bar over -60..0 dBFS, with the "good" range shaded. */
 @Composable
@@ -122,8 +128,12 @@ fun TransferCardView(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val arrow = if (card.direction == Direction.OUTGOING) "Sending" else "Receiving"
+                val who = when {
+                    card.direction == Direction.INCOMING -> card.peer?.let { " from $it" } ?: ""
+                    else -> " to " + (card.peer ?: "all")
+                }
                 Text(
-                    "$arrow ${card.name.ifBlank { card.sessionLabel }}",
+                    "$arrow ${card.name.ifBlank { card.sessionLabel }}$who",
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -132,6 +142,7 @@ fun TransferCardView(
                 AssistChip(onClick = {}, label = { Text(phaseLabel(card.phase)) })
             }
             LinearProgressIndicator(progress = { card.progress }, modifier = Modifier.fillMaxWidth())
+            card.preview?.let { ProgressivePreview(it, Modifier.size(160.dp)) }
             ChunkGrid(card.chunkStates)
             // Fixed set of single-line rows: numbers change while chunks arrive, the card's height does not.
             val snr = if (card.snrDb.isNaN()) "-" else "%.1f dB".format(card.snrDb)
@@ -140,6 +151,7 @@ fun TransferCardView(
             val missing = if (card.missing.isEmpty()) "Missing: none" else
                 "Missing ${card.missing.size}: " + card.missing.take(12).joinToString(", ") + if (card.missing.size > 12) " ..." else ""
             StatLine(missing, if (card.missing.isEmpty()) null else RadioColors.missing)
+            if (card.ackedBy.isNotEmpty()) StatLine("Confirmed by " + card.ackedBy.joinToString(", "), RadioColors.ok)
             // Keeps its height when the buttons come and go.
             Row(Modifier.heightIn(min = 40.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (card.canRequestCorrections) {
@@ -200,6 +212,27 @@ fun PayloadImage(bytes: ByteArray, description: String, modifier: Modifier = Mod
         modifier = modifier,
     )
 }
+
+/**
+ * A progressive image on its way: the small level scaled up (smooth, so it reads as a blurry preview) with the
+ * rows of the full picture that have arrived drawn over it.
+ */
+@Composable
+fun ProgressivePreview(preview: ImagePreview, modifier: Modifier = Modifier) {
+    val base = remember(preview.complete) { preview.complete?.let { decodeImage(it)?.asImageBitmap() } }
+    val top = remember(preview.partial?.size) { preview.partial?.let { decodePartialImage(it)?.asImageBitmap() } }
+    Box(modifier.semantics { contentDescription = "Image arriving, preview" }) {
+        val fill = Modifier.matchParentSize()
+        base?.let {
+            Image(it, null, fill, contentScale = ContentScale.Fit, filterQuality = if (preview.isFinal) FilterQuality.None else FilterQuality.High)
+        }
+        top?.let { Image(it, null, fill, contentScale = ContentScale.Fit, filterQuality = FilterQuality.None) }
+    }
+}
+
+/** Bytes to display for a stored image payload: a progressive one shows its sharpest level. */
+fun displayImageBytes(type: ContentType?, bytes: ByteArray): ByteArray =
+    if (type == ContentType.IMAGE_PROGRESSIVE) ProgressiveImage.finalImage(bytes) ?: bytes else bytes
 
 val RoundedSmall = RoundedCornerShape(8.dp)
 

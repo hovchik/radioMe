@@ -35,6 +35,11 @@ interface TransceiverClient {
 
     /** Settings that apply without restarting the link. */
     fun applyLive(route: RoutePreference, outputGain: Float)
+    /** Callsign for the STATION frame on everything the running link sends. */
+    fun setCallsign(callsign: String)
+
+    /** Start a two-station link test (see [com.radiome.core.protocol.link.LinkTest]). Null when the radio is off. */
+    suspend fun startLinkTest(to: String?): Int?
     /** Restart the link so lead-in and ARQ settings take effect. No-op when the radio is off. */
     fun restartLink()
 

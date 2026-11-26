@@ -9,6 +9,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -43,6 +46,9 @@ fun SettingsScreen(
     ) {
         Section("Permissions")
         PermissionsSection(onBeforeRevokeMicrophone)
+
+        Section("Station")
+        StationSection(settings, onChange)
 
         Section("Radio")
         Choice("Audio route", RoutePreference.entries, settings.routePreference, {
@@ -86,6 +92,40 @@ fun SettingsScreen(
             "Turnaround", settings.turnaroundMs, RadioSettings.MIN_TURNAROUND, RadioSettings.MAX_TURNAROUND, 100, "ms",
             "Quiet time before answering, so the other radio has stopped transmitting.",
         ) { v -> onChange { it.copy(turnaroundMs = v) } }
+    }
+}
+
+@Composable
+private fun StationSection(settings: RadioSettings, onChange: ((RadioSettings) -> RadioSettings) -> Unit) {
+    var callsign by remember(settings.callsign) { mutableStateOf(settings.callsign) }
+    OutlinedTextField(
+        value = callsign,
+        onValueChange = {
+            callsign = it.uppercase()
+            onChange { s -> s.copy(callsign = it) }
+        },
+        label = { Text("Callsign") },
+        supportingText = {
+            Text("Sent in clear at the start of every burst. Others can address messages to it. Letters, digits and /, up to 10.")
+        },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    var quick by remember(settings.quickMessages) { mutableStateOf(settings.quickMessages.joinToString("\n")) }
+    OutlinedTextField(
+        value = quick,
+        onValueChange = { quick = it },
+        label = { Text("Quick messages, one per line") },
+        modifier = Modifier.fillMaxWidth(),
+        minLines = 3,
+    )
+    val changed = quick.lines().map { it.trim() }.filter { it.isNotEmpty() } != settings.quickMessages
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { onChange { it.copy(quickMessages = quick.lines()) } }, enabled = changed) { Text("Save quick messages") }
+        OutlinedButton(onClick = { onChange { it.copy(quickMessages = RadioSettings.DEFAULT_QUICK_MESSAGES) } }) { Text("Defaults") }
+    }
+    Toggle("Images: preview first", settings.imageProgressive, "A tiny copy goes out before the picture, so the receiver sees it early. Costs a few seconds of air time.") { v ->
+        onChange { it.copy(imageProgressive = v) }
     }
 }
 

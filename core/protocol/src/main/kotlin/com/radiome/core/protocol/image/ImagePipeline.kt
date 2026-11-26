@@ -27,6 +27,8 @@ data class ImagePreset(
     /** WebP quality, 10..40 %. */
     val quality: Int = 25,
     val grayscale: Boolean = false,
+    /** Send a small preview first ([ProgressiveImage]), so the receiver sees the picture early. */
+    val progressive: Boolean = false,
 ) {
     init {
         require(quality in MIN_QUALITY..MAX_QUALITY) { "quality must be $MIN_QUALITY..$MAX_QUALITY" }
@@ -93,15 +95,31 @@ class ImagePipeline(
     fun prepare(source: RasterImage, preset: ImagePreset, options: TransferOptions = TransferOptions(), name: String = ""): PreparedImage {
         var img = ImageProcessor.resize(source, preset.maxEdge.pixels)
         if (preset.grayscale) img = ImageProcessor.grayscale(img)
-        val bytes = encoder.encodeWebp(img, preset.quality)
+        val full = encoder.encodeWebp(img, preset.quality)
+        var type = ContentType.IMAGE_WEBP
+        var bytes = full
+        if (preset.progressive) {
+            val small = ImageProcessor.resize(img, previewEdge(preset.maxEdge))
+            val preview = encoder.encodeWebp(small, ImagePreset.MIN_QUALITY)
+            // A preview that costs as much as the picture itself is not worth sending.
+            if (preview.size * 3 <= full.size && full.size <= 0xFFFF) {
+                type = ContentType.IMAGE_PROGRESSIVE
+                bytes = ProgressiveImage.pack(listOf(preview, full))
+            }
+        }
         // WebP is already entropy coded; deflating it again only costs CPU.
         val opts = options.copy(compression = CompressionMode.NEVER)
         return PreparedImage(
-            payload = Payload(ContentType.IMAGE_WEBP, bytes, name),
+            payload = Payload(type, bytes, name),
             width = img.width,
             height = img.height,
             sizeBytes = bytes.size,
             airtimeMs = airtime.payloadMs(bytes.size, opts),
         )
+    }
+
+    companion object {
+        /** Long edge of the progressive preview: about an eighth of the picture, at least 24 px. */
+        fun previewEdge(maxEdge: MaxEdge): Int = maxOf(24, maxEdge.pixels / 8)
     }
 }

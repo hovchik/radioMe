@@ -65,9 +65,10 @@ object Packetizer {
     }
 
     fun bursts(frames: List<Frame>, options: TransferOptions): List<PhyBurst> =
-        frames.chunked(options.maxFramesPerBurst).map {
+        frames.chunked(options.contentFramesPerBurst).map { group ->
+            val station = options.station?.frame(group.first().sessionId, group.first().totalChunks)
             BurstCodec.encodeFrames(
-                it,
+                if (station != null) listOf(station) + group else group,
                 options.profile,
                 payloadCapacity = options.chunkPayloadSize,
                 parityRatio = options.effectiveParityRatio,

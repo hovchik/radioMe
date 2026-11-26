@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -17,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,7 +50,9 @@ import com.radiome.core.protocol.image.ImagePreset
 import com.radiome.core.protocol.image.MaxEdge
 import com.radiome.core.protocol.link.LinkState
 import com.radiome.feature.transceiver.ComposeUi
+import com.radiome.feature.transceiver.HeardStation
 import com.radiome.feature.transceiver.ImageDraftUi
+import com.radiome.feature.transceiver.LinkTestUi
 import com.radiome.feature.transceiver.Presenters
 import com.radiome.feature.transceiver.RadioUi
 import kotlin.math.roundToInt
@@ -70,6 +75,14 @@ fun RadioScreen(
     onSendImage: () -> Unit,
     onRequestCorrections: (Int) -> Unit,
     onCancel: (Int) -> Unit,
+    linkTest: LinkTestUi,
+    heard: List<HeardStation>,
+    quickMessages: List<String>,
+    onLinkTest: () -> Unit,
+    onApplyLinkTest: () -> Unit,
+    onDismissLinkTest: () -> Unit,
+    onToChange: (String) -> Unit,
+    onQuickMessage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -77,14 +90,15 @@ fun RadioScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { StatusCard(radio, restartPending, onStart, onStop, onRestart, onTestTone) }
+        item { StatusCard(radio, restartPending, onStart, onStop, onRestart, onTestTone, onLinkTest, linkTest.running) }
+        if (linkTest.visible) item { LinkTestCard(linkTest, onApplyLinkTest, onDismissLinkTest) }
         items(radio.transfers, key = { it.sessionId * 2 + it.direction.ordinal }) { card ->
             TransferCardView(card, { onRequestCorrections(card.sessionId) }, { onCancel(card.sessionId) })
         }
         item {
             ComposeCard(
                 compose, radio.running, onDraftChange, onProfileChange, onSendText, onPickImage,
-                onImagePreset, onClearImage, onSendImage,
+                onImagePreset, onClearImage, onSendImage, heard, quickMessages, onToChange, onQuickMessage,
             )
         }
     }
@@ -98,6 +112,8 @@ private fun StatusCard(
     onStop: () -> Unit,
     onRestart: () -> Unit,
     onTestTone: () -> Unit,
+    onLinkTest: () -> Unit,
+    linkTestRunning: Boolean,
 ) {
     // Every row below is always present and single-line (or fixed at two lines), so live telemetry changes the
     // text but never the card's height.
@@ -159,6 +175,56 @@ private fun StatusCard(
                     }
                     Spacer(Modifier.width(8.dp))
                     OutlinedButton(onClick = onTestTone, enabled = radio.linkState != LinkState.TRANSMITTING) { Text("Test tone") }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = onLinkTest, enabled = !linkTestRunning && radio.linkState != LinkState.TRANSMITTING) {
+                        Text("Link test")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LinkTestCard(test: LinkTestUi, onApply: () -> Unit, onDismiss: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val title = when {
+                    test.running -> "Link test running"
+                    test.measuredHere -> "Link test from ${test.peer ?: "another station"}"
+                    else -> "Link test" + (test.peer?.let { " with $it" } ?: "")
+                }
+                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (!test.running) IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = "Close link test") }
+            }
+            when {
+                test.running -> {
+                    Text(
+                        "Sending probe bursts in Fast, Standard and Robust (about 25 s), then waiting for the other station's report.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                test.error != null -> Text(test.error, color = MaterialTheme.colorScheme.error)
+                test.report != null -> {
+                    for (r in test.report.results) {
+                        val snr = if (r.snrDb.isNaN()) "not heard" else "SNR %.1f dB".format(r.snrDb)
+                        val fec = if (r.received == 0) "" else " · FEC %.1f B/frame".format(r.errorsPerFrame)
+                        Text(
+                            "${profileLabel(r.profile)}: ${r.received}/${r.sent} frames · $snr$fec",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (r.lost > 0) RadioColors.missing else MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                    test.recommendation?.let { rec ->
+                        Text("Suggested: ${Presenters.recommendationLabel(rec)}", style = MaterialTheme.typography.titleSmall)
+                        Text(rec.reason, style = MaterialTheme.typography.bodySmall)
+                        if (test.measuredHere) {
+                            Text("This measures their transmissions to you. The report went back to them.", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Button(onClick = onApply) { Text("Use ${Presenters.recommendationLabel(rec)}") }
+                    }
                 }
             }
         }
@@ -186,10 +252,30 @@ private fun ComposeCard(
     onImagePreset: (ImagePreset) -> Unit,
     onClearImage: () -> Unit,
     onSendImage: () -> Unit,
+    heard: List<HeardStation>,
+    quickMessages: List<String>,
+    onToChange: (String) -> Unit,
+    onQuickMessage: (String) -> Unit,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Send", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                value = compose.to,
+                onValueChange = onToChange,
+                label = { Text("To (callsign)") },
+                placeholder = { Text("All stations") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (heard.isNotEmpty()) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = compose.to.isBlank(), onClick = { onToChange("") }, label = { Text("All") })
+                    heard.forEach { h ->
+                        FilterChip(selected = compose.to == h.callsign, onClick = { onToChange(h.callsign) }, label = { Text(h.callsign) })
+                    }
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ModemProfile.entries.forEach { p ->
                     FilterChip(
@@ -200,6 +286,13 @@ private fun ComposeCard(
                 }
             }
             val image = compose.image
+            if (image == null && quickMessages.isNotEmpty()) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    quickMessages.forEach { q ->
+                        SuggestionChip(onClick = { onQuickMessage(q) }, enabled = running && !compose.sending, label = { Text(q) })
+                    }
+                }
+            }
             if (image == null) {
                 OutlinedTextField(
                     value = compose.draft,
@@ -282,6 +375,13 @@ private fun ImageDraft(
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Grayscale", Modifier.weight(1f))
         Switch(checked = preset.grayscale, onCheckedChange = { onImagePreset(preset.copy(grayscale = it)) })
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Preview first")
+            Text("A tiny copy goes out first so the receiver sees the picture early.", style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked = preset.progressive, onCheckedChange = { onImagePreset(preset.copy(progressive = it)) })
     }
     Button(
         onClick = onSendImage,

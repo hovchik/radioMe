@@ -47,6 +47,8 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
     val history by viewModel.historyItems.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val restartPending by viewModel.restartPending.collectAsStateWithLifecycle()
+    val linkTest by viewModel.linkTest.collectAsStateWithLifecycle()
+    val heard by viewModel.heardStations.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.RADIO) }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -116,6 +118,14 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
                 onSendImage = viewModel::sendImage,
                 onRequestCorrections = { viewModel.requestCorrections(it) },
                 onCancel = { viewModel.cancel(it) },
+                linkTest = linkTest,
+                heard = heard,
+                quickMessages = settings.quickMessages,
+                onLinkTest = { viewModel.startLinkTest() },
+                onApplyLinkTest = viewModel::applyLinkTestRecommendation,
+                onDismissLinkTest = viewModel::dismissLinkTest,
+                onToChange = viewModel::onToChange,
+                onQuickMessage = viewModel::sendQuickMessage,
                 modifier = modifier,
             )
             Tab.HISTORY -> HistoryScreen(history, { viewModel.deleteHistory(it) }, modifier)

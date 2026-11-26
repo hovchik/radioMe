@@ -2,6 +2,7 @@ package com.radiome.core.protocol.session
 
 import com.radiome.core.dsp.framing.FrameCodec
 import com.radiome.core.dsp.modem.ModemProfile
+import com.radiome.core.protocol.link.StationInfo
 import com.radiome.core.protocol.payload.CompressionMode
 
 data class TransferOptions(
@@ -15,6 +16,8 @@ data class TransferOptions(
     val compression: CompressionMode = CompressionMode.AUTO,
     /** Upper bound on frames in one burst (each burst repeats lead-in, sync and PHY header). */
     val maxFramesPerBurst: Int = 64,
+    /** When set, every burst starts with a STATION frame (callsign and destination). */
+    val station: StationInfo? = null,
 ) {
     init {
         require(chunkPayloadSize in MIN_CHUNK..MAX_CHUNK) { "chunk payload must be $MIN_CHUNK..$MAX_CHUNK" }
@@ -27,6 +30,9 @@ data class TransferOptions(
     val effectiveInterleaveDepth: Int get() = interleaveDepth ?: profile.defaultInterleaveDepth
 
     fun withProfile(p: ModemProfile) = copy(profile = p, parityRatio = parityRatio, interleaveDepth = interleaveDepth)
+
+    /** Frames from the transfer itself in one burst (one slot goes to the STATION frame when there is one). */
+    val contentFramesPerBurst: Int get() = if (station == null) maxFramesPerBurst else maxOf(1, minOf(maxFramesPerBurst, 254) - 1)
 
     companion object {
         const val MIN_CHUNK = 32

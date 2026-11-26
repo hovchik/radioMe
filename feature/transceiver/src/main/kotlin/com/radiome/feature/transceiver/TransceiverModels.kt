@@ -6,6 +6,9 @@ import com.radiome.core.dsp.modem.RxState
 import com.radiome.core.protocol.arq.ReceiverPhase
 import com.radiome.core.protocol.arq.SenderPhase
 import com.radiome.core.protocol.image.ImagePreset
+import com.radiome.core.protocol.image.ImagePreview
+import com.radiome.core.protocol.link.LinkRecommendation
+import com.radiome.core.protocol.link.LinkTestReport
 import com.radiome.core.protocol.link.Direction
 import com.radiome.core.protocol.link.LinkController
 import com.radiome.core.protocol.link.LinkEvent
@@ -76,6 +79,11 @@ data class TransferCard(
     val canRequestCorrections: Boolean,
     val canCancel: Boolean,
     val finished: Boolean,
+    /** Sender of an incoming transfer, addressee of an outgoing one (null = all stations or unknown). */
+    val peer: String? = null,
+    val ackedBy: List<String> = emptyList(),
+    /** Progressive image received so far (incoming only). */
+    val preview: ImagePreview? = null,
 ) {
     val progress: Float get() = if (totalChunks <= 0) 0f else receivedChunks.toFloat() / totalChunks
     val sessionLabel: String get() = "%04X".format(sessionId)
@@ -100,7 +108,27 @@ data class ImageDraftUi(
     override fun hashCode(): Int = (bytes?.contentHashCode() ?: 0) * 31 + preset.hashCode()
 }
 
+/** A station whose STATION frame we decoded. */
+data class HeardStation(val callsign: String, val lastHeardMs: Long, val snrDb: Double)
+
+/** The link test card. */
+data class LinkTestUi(
+    val running: Boolean = false,
+    val sessionId: Int? = null,
+    val report: LinkTestReport? = null,
+    val recommendation: LinkRecommendation? = null,
+    /** The other station: who answered our test, or who tested us. */
+    val peer: String? = null,
+    /** True when another station ran the test and we measured it. */
+    val measuredHere: Boolean = false,
+    val error: String? = null,
+) {
+    val visible: Boolean get() = running || report != null || error != null
+}
+
 data class ComposeUi(
+    /** Addressee callsign; blank sends to every station. */
+    val to: String = "",
     val draft: String = "",
     val profile: ModemProfile = ModemProfile.STANDARD,
     val textEstimate: ComposeEstimate? = null,
@@ -184,6 +212,9 @@ object Presenters {
             canRequestCorrections = t.direction == Direction.INCOMING && t.phase == ReceiverPhase.AWAITING_REPAIR.name && t.missing.isNotEmpty(),
             canCancel = t.direction == Direction.OUTGOING && (t.phase == SenderPhase.TRANSMITTING.name || t.phase == SenderPhase.AWAITING_RESPONSE.name),
             finished = finished,
+            peer = t.peer,
+            ackedBy = t.ackedBy,
+            preview = t.preview?.takeIf { t.direction == Direction.INCOMING && !finished },
         )
     }
 
@@ -200,12 +231,19 @@ object Presenters {
 
     /** One-line notice for the snackbar, or null for events the dashboard already shows. */
     fun eventMessage(e: LinkEvent, autoNack: Boolean): String? = when (e) {
-        is LinkEvent.MessageReceived -> when (e.payload.type) {
-            ContentType.TEXT -> "Message received: " + e.payload.asText().take(60)
-            ContentType.IMAGE_WEBP -> "Image received (${e.payload.bytes.size} bytes)"
-            ContentType.BINARY -> "File received (${e.payload.bytes.size} bytes)"
+        is LinkEvent.MessageReceived -> {
+            val from = e.from?.let { " from $it" } ?: ""
+            when (e.payload.type) {
+                ContentType.TEXT -> "Message$from: " + e.payload.asText().take(60)
+                ContentType.IMAGE_WEBP, ContentType.IMAGE_PROGRESSIVE -> "Image received$from (${e.payload.bytes.size} bytes)"
+                ContentType.BINARY -> "File received$from (${e.payload.bytes.size} bytes)"
+            }
         }
-        is LinkEvent.Delivered -> "Delivered: the other station confirmed transfer %04X".format(e.sessionId)
+        is LinkEvent.Delivered -> (e.by?.let { "Delivered: $it confirmed transfer %04X" } ?: "Delivered: the other station confirmed transfer %04X")
+            .format(e.sessionId)
+        is LinkEvent.LinkTestReported -> if (!e.measuredHere) null else
+            "Link test from ${e.peer ?: "another station"} measured; the report was sent back."
+        is LinkEvent.LinkTestFailed -> "Link test: ${e.reason}."
         is LinkEvent.Failed -> "Transfer %04X failed: %s".format(e.sessionId, e.reason)
         // When it ended a transfer, the Failed event that follows says so.
         is LinkEvent.AudioOutputFailed -> when {
@@ -222,6 +260,13 @@ object Presenters {
         val s = (ms / 1000.0)
         return if (s < 60) "%.1f s".format(s) else "%d min %02d s".format((s / 60).toInt(), (s % 60).roundToInt().coerceAtMost(59))
     }
+
+    /** Short description of a suggestion, for the link test card and its button. */
+    fun recommendationLabel(r: LinkRecommendation): String = "${r.profile.name.lowercase().replaceFirstChar { it.uppercase() }}, ${r.parityPercent}% parity"
+
+    /** Merge a STATION frame into the heard list: newest first, at most [max] stations. */
+    fun heard(list: List<HeardStation>, callsign: String, now: Long, snrDb: Double, max: Int = 12): List<HeardStation> =
+        (listOf(HeardStation(callsign, now, snrDb)) + list.filterNot { it.callsign == callsign }).take(max)
 
     fun formatBytes(n: Int): String = if (n < 1024) "$n B" else "%.1f KB".format(n / 1024.0)
 }

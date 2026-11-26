@@ -55,7 +55,11 @@ private fun HistoryRow(r: TransferRecord, onDelete: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val dir = if (r.direction == Direction.OUTGOING) "Sent" else "Received"
                 Column(Modifier.weight(1f)) {
-                    Text("$dir · ${statusLabel(r.status)}", style = MaterialTheme.typography.titleSmall)
+                    val who = when (r.direction) {
+                        Direction.INCOMING -> r.peer?.let { " from $it" } ?: ""
+                        Direction.OUTGOING -> r.peer?.let { " to $it" } ?: ""
+                    }
+                    Text("$dir$who · ${statusLabel(r.status)}", style = MaterialTheme.typography.titleSmall)
                     Text(
                         "$time · %04X".format(r.sessionId) + (r.profile?.let { " · ${it.lowercase()}" } ?: ""),
                         style = MaterialTheme.typography.bodySmall,
@@ -65,8 +69,8 @@ private fun HistoryRow(r: TransferRecord, onDelete: () -> Unit) {
             }
             when {
                 r.contentType == ContentType.TEXT && r.text != null -> Text(r.text!!, style = MaterialTheme.typography.bodyLarge)
-                r.contentType == ContentType.IMAGE_WEBP && r.payload != null ->
-                    PayloadImage(r.payload!!, "Image ${r.name}", Modifier.fillMaxWidth().heightIn(max = 240.dp))
+                r.contentType?.isImage == true && r.payload != null ->
+                    PayloadImage(displayImageBytes(r.contentType, r.payload!!), "Image ${r.name}", Modifier.fillMaxWidth().heightIn(max = 240.dp))
                 r.payload != null -> Text("${r.payload!!.size} bytes ${r.name}")
                 else -> Unit
             }
