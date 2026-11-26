@@ -8,6 +8,7 @@ import android.os.IBinder
 import com.radiome.core.audio.RoutePreference
 import com.radiome.core.audio.TransceiverService
 import com.radiome.core.dsp.modem.DemodTelemetry
+import com.radiome.core.protocol.crypto.GroupKey
 import com.radiome.core.protocol.link.LinkController
 import com.radiome.core.protocol.link.LinkEvent
 import com.radiome.core.protocol.link.LinkState
@@ -96,6 +97,10 @@ class ServiceTransceiverClient(
 
     override fun setCallsign(callsign: String) {
         service.value?.setCallsign(callsign)
+    }
+
+    override fun setGroupKey(key: GroupKey?) {
+        service.value?.setGroupKey(key?.encoded())
     }
 
     override suspend fun startLinkTest(to: String?): Int? = service.value?.onLink { it.startLinkTest(to) }

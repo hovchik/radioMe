@@ -9,6 +9,10 @@ enum class ContentType(val code: Int) {
     BINARY(3),
     /** Several WebP sizes of one picture, smallest first ([com.radiome.core.protocol.image.ProgressiveImage]). */
     IMAGE_PROGRESSIVE(4),
+    /** AES-GCM envelope around another payload ([com.radiome.core.protocol.crypto.SecureEnvelope]). */
+    ENCRYPTED(5),
+    /** GPS fix ([Position]); only ever sent encrypted. */
+    POSITION(6),
     ;
 
     val isImage: Boolean get() = this == IMAGE_WEBP || this == IMAGE_PROGRESSIVE

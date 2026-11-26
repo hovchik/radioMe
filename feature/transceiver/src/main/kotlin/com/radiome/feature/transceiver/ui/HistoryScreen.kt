@@ -59,7 +59,8 @@ private fun HistoryRow(r: TransferRecord, onDelete: () -> Unit) {
                         Direction.INCOMING -> r.peer?.let { " from $it" } ?: ""
                         Direction.OUTGOING -> r.peer?.let { " to $it" } ?: ""
                     }
-                    Text("$dir$who · ${statusLabel(r.status)}", style = MaterialTheme.typography.titleSmall)
+                    val lock = if (r.encrypted) " · encrypted" else ""
+                    Text("$dir$who · ${statusLabel(r.status)}$lock", style = MaterialTheme.typography.titleSmall)
                     Text(
                         "$time · %04X".format(r.sessionId) + (r.profile?.let { " · ${it.lowercase()}" } ?: ""),
                         style = MaterialTheme.typography.bodySmall,

@@ -5,6 +5,7 @@ import com.radiome.core.dsp.framing.CodewordStatus
 import com.radiome.core.protocol.link.Direction
 import com.radiome.core.protocol.payload.ContentType
 import com.radiome.core.protocol.payload.Payload
+import com.radiome.core.protocol.payload.Position
 import com.radiome.core.protocol.session.ChunkTracker
 import com.radiome.core.protocol.session.Packetizer
 import com.radiome.data.db.RadioDatabase
@@ -14,6 +15,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -130,5 +132,38 @@ class RoomStoreTest {
         val resumed = store.load(99)!!
         assertEquals("other.webp", resumed.header!!.name)
         assertArrayEquals(second.dataFrames[0].payload, resumed.chunks.getValue(0))
+    }
+
+    @Test
+    fun positionsKeepTheLatestFixPerStationAndRefuseReplays() = runBlocking {
+        val repo = PositionRepository(db) { clock }
+        clock = 1_795_000_000_000L
+        val t = clock / 1000
+        assertTrue(repo.addReceived("EK1A", Position(40.18, 44.51, timeSec = t - 60), 9.5))
+        assertTrue(repo.addReceived("EK1A", Position(40.19, 44.52, timeSec = t - 30), 9.0))
+        // A recording of the first beacon played back later.
+        assertFalse(repo.addReceived("EK1A", Position(40.18, 44.51, timeSec = t - 60), 9.5))
+        assertFalse(repo.addReceived("EK2B", Position(1.0, 2.0, timeSec = t + 3600), null), "fix from the future")
+        repo.addOwn("EK9Z", Position(40.0, 44.0, timeSec = t))
+
+        val latest = repo.observeLatest().first()
+        assertEquals(2, latest.size)
+        val ek1a = latest.single { it.callsign == "EK1A" }
+        assertEquals(40.19, ek1a.position.latitude, 1e-9)
+        assertTrue(latest.single { it.own }.callsign == "EK9Z")
+    }
+
+    @Test
+    fun encryptedIncomingIsMarkedAndUnreadableOnesSaySo() = runBlocking {
+        val repo = TransferRepository(db) { clock }
+        val store = RoomSessionStore(db) { clock }
+        val transfer = Packetizer.packetize(image, 33)
+        val tracker = ChunkTracker(33)
+        transfer.allFrames().forEach { tracker.accept(it, CodewordStatus.OK, 0) }
+        store.save(tracker.snapshot(0))
+        repo.markReceived(33, Payload(ContentType.ENCRYPTED, ByteArray(40)), "EK1A", encrypted = true, unreadable = "no group key set")
+        val row = repo.observeHistory().first().single()
+        assertTrue(row.encrypted)
+        assertTrue(row.text!!.contains("no group key set"))
     }
 }

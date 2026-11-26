@@ -133,7 +133,7 @@ HEADER frame payload:
 | Offset | Size | Field                                              |
 |--------|------|----------------------------------------------------|
 | 0      | 1    | Header version (= 1)                               |
-| 1      | 1    | Content type: TEXT = 1, IMAGE_WEBP = 2, BINARY = 3, IMAGE_PROGRESSIVE = 4 |
+| 1      | 1    | Content type: TEXT = 1, IMAGE_WEBP = 2, BINARY = 3, IMAGE_PROGRESSIVE = 4, ENCRYPTED = 5, POSITION = 6 |
 | 2      | 1    | Flags: bit 0 = raw DEFLATE                         |
 | 3      | 4    | Wire length (bytes carried by DATA chunks)         |
 | 7      | 4    | Original length                                    |
@@ -226,3 +226,40 @@ version u8 (= 1) | entries u8 | entries x (profile id, sent, received, repaired,
 Both sides suggest the fastest profile whose probes all arrived at or above its SNR floor (FAST 6 dB,
 STANDARD 0 dB), with parity `2 * ceil(2 * errors per frame + 1)` bytes, rounded up to 5% and kept within 20..50%;
 otherwise ROBUST at 50%. The tester gives up after twice the response timeout with no report.
+
+## 11. End-to-end encryption and position beacons
+
+> Encryption is not allowed on amateur radio bands. Use it on licence-free (PMR446, FRS) or licensed private
+> channels. The STATION frame (callsign) always stays in clear.
+
+### Group key
+
+Every member enters the same passphrase. The 256-bit key is `PBKDF2-HMAC-SHA256(passphrase, "RadioMe group key v1",
+150000 iterations)`. The app never stores the passphrase; Android keeps the derived key wrapped by a non-exportable
+AES key in the hardware-backed Keystore. People compare an 8-hex-digit fingerprint (`SHA-256("RadioMe fingerprint v1"
+|| key)`, first 4 bytes) by voice. The 2-byte key id on air is a different hash (`"RadioMe key id v1"`), so it says
+nothing about the fingerprint or the key.
+
+### Envelope (ENCRYPTED = 5)
+
+```
+envelope  : version u8 (= 1) | key id u16 | nonce 12 bytes (SecureRandom) | AES-256-GCM ciphertext | tag 16 bytes
+plaintext : inner content type | name length u8 | name | data length u16 | data | zero padding to a multiple of 16
+AAD       : version | key id | sender callsign (ASCII, from its STATION frame)
+```
+
+The session header shows only `ENCRYPTED`, an empty name and the envelope length. Content type, name and data are
+inside. Padding makes a position and a short text the same size on air. Binding the callsign as AAD means a recorded
+envelope replayed under another callsign fails the tag check. A receiver without the key, or with another
+group's key, reports "not readable" and stores nothing it can't verify.
+
+### Position (POSITION = 6, always sealed)
+
+```
+version u8 (= 1) | lat i32 (1e-7 deg) | lon i32 (1e-7 deg) | altitude i16 m | accuracy u16 m | speed u8 (0.5 m/s) | course u8 | fix time u32 (unix s)
+```
+
+That is 19 bytes, which seals to 63 bytes, so a beacon is one HEADER frame plus one DATA frame at P = 64 (ROBUST by default,
+about 5 s with the STATION frame). The link refuses to send a POSITION without a group key. Receivers put a fix on the map only if it
+opened with the group key, came from an identified station, and is newer than that station's last fix (and not more
+than 10 minutes in the future), so replaying an old beacon cannot move anyone.

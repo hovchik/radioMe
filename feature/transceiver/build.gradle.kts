@@ -55,6 +55,8 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
+    // OpenStreetMap view with an on-disk tile cache for offline use.
+    implementation(libs.osmdroid)
 
     testImplementation(libs.junit4)
     testImplementation(libs.kotlinx.coroutines.test)

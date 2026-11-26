@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -35,6 +36,7 @@ import com.radiome.feature.transceiver.TransceiverViewModel
 
 private enum class Tab(val label: String, val icon: ImageVector) {
     RADIO("Radio", Icons.Filled.Home),
+    MAP("Map", Icons.Filled.LocationOn),
     HISTORY("History", Icons.AutoMirrored.Filled.List),
     SETTINGS("Settings", Icons.Filled.Settings),
 }
@@ -49,6 +51,10 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
     val restartPending by viewModel.restartPending.collectAsStateWithLifecycle()
     val linkTest by viewModel.linkTest.collectAsStateWithLifecycle()
     val heard by viewModel.heardStations.collectAsStateWithLifecycle()
+    val positions by viewModel.positions.collectAsStateWithLifecycle()
+    val groupKey by viewModel.groupKey.collectAsStateWithLifecycle()
+    val keyBusy by viewModel.keyBusy.collectAsStateWithLifecycle()
+    val now by viewModel.now.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.RADIO) }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -78,6 +84,19 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
         } else {
             PermissionPrompts.markAsked(context, wanted)
             permissions.launch(wanted.toTypedArray())
+        }
+    }
+    // Location is asked for only when the user wants to send a position; the map itself needs no permission.
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted.values.any { it }) viewModel.sendPositionNow()
+    }
+    val sendPosition = {
+        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (fine || coarse) {
+            viewModel.sendPositionNow()
+        } else {
+            locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -128,8 +147,26 @@ fun TransceiverApp(viewModel: TransceiverViewModel = hiltViewModel()) {
                 onQuickMessage = viewModel::sendQuickMessage,
                 modifier = modifier,
             )
+            Tab.MAP -> MapScreen(
+                positions = positions,
+                hasKey = groupKey != null,
+                fingerprint = groupKey?.fingerprint,
+                now = now,
+                onSendPosition = { sendPosition() },
+                onClear = { viewModel.clearPositions() },
+                modifier = modifier,
+            )
             Tab.HISTORY -> HistoryScreen(history, { viewModel.deleteHistory(it) }, modifier)
-            Tab.SETTINGS -> SettingsScreen(settings, viewModel::updateSettings, viewModel::stopListening, modifier)
+            Tab.SETTINGS -> SettingsScreen(
+                settings = settings,
+                onChange = viewModel::updateSettings,
+                onBeforeRevokeMicrophone = viewModel::stopListening,
+                groupKeyFingerprint = groupKey?.fingerprint,
+                keyBusy = keyBusy,
+                onSetPassphrase = viewModel::setGroupPassphrase,
+                onClearKey = { viewModel.clearGroupKey() },
+                modifier = modifier,
+            )
         }
     }
 }

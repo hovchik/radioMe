@@ -8,7 +8,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.radiome.core.protocol.crypto.GroupKey
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +42,10 @@ fun SettingsScreen(
     settings: RadioSettings,
     onChange: ((RadioSettings) -> RadioSettings) -> Unit,
     onBeforeRevokeMicrophone: () -> Unit,
+    groupKeyFingerprint: String?,
+    keyBusy: Boolean,
+    onSetPassphrase: (String) -> Unit,
+    onClearKey: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -49,6 +59,9 @@ fun SettingsScreen(
 
         Section("Station")
         StationSection(settings, onChange)
+
+        Section("Group encryption")
+        EncryptionSection(settings, onChange, groupKeyFingerprint, keyBusy, onSetPassphrase, onClearKey)
 
         Section("Radio")
         Choice("Audio route", RoutePreference.entries, settings.routePreference, {
@@ -127,6 +140,62 @@ private fun StationSection(settings: RadioSettings, onChange: ((RadioSettings) -
     Toggle("Images: preview first", settings.imageProgressive, "A tiny copy goes out before the picture, so the receiver sees it early. Costs a few seconds of air time.") { v ->
         onChange { it.copy(imageProgressive = v) }
     }
+}
+
+@Composable
+private fun EncryptionSection(
+    settings: RadioSettings,
+    onChange: ((RadioSettings) -> RadioSettings) -> Unit,
+    fingerprint: String?,
+    busy: Boolean,
+    onSetPassphrase: (String) -> Unit,
+    onClearKey: () -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+        Text(
+            "Encryption is not allowed on amateur radio bands. Use it only on licence-free (PMR446, FRS) or licensed " +
+                "private channels. The callsign is always sent in clear.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(12.dp),
+        )
+    }
+    Text(
+        if (fingerprint != null) "Group key set · fingerprint $fingerprint" else "No group key. Positions can't be sent or read until you set one.",
+        style = MaterialTheme.typography.bodyLarge,
+    )
+    Text(
+        "Everyone in the group enters the same passphrase, then compares fingerprints by voice. The passphrase is not stored; " +
+            "the derived key is kept wrapped by the phone's hardware keystore.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    var pass by remember { mutableStateOf("") }
+    OutlinedTextField(
+        value = pass,
+        onValueChange = { pass = it },
+        label = { Text("Group passphrase") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(
+            onClick = {
+                onSetPassphrase(pass)
+                pass = ""
+            },
+            enabled = !busy && pass.length >= GroupKey.MIN_PASSPHRASE,
+        ) { Text(if (busy) "Deriving key..." else if (fingerprint == null) "Set key" else "Replace key") }
+        if (fingerprint != null) OutlinedButton(onClick = onClearKey) { Text("Remove key") }
+    }
+    Toggle(
+        "Encrypt messages and images too", settings.encryptMessages,
+        "Positions are always encrypted. This also seals texts, images and files with the group key.",
+    ) { v -> onChange { it.copy(encryptMessages = v) } }
+    Choice("Send my position automatically", RadioSettings.BEACON_INTERVALS, settings.beaconIntervalMin, {
+        if (it == 0) "Off" else "$it min"
+    }) { v -> onChange { it.copy(beaconIntervalMin = v) } }
+    Choice("Beacon profile", ModemProfile.entries, settings.beaconProfile, ::profileLabel) { v -> onChange { it.copy(beaconProfile = v) } }
 }
 
 @Composable

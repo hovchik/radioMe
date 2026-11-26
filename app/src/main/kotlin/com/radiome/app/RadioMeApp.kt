@@ -11,6 +11,8 @@ import com.radiome.core.protocol.link.LinkController
 import com.radiome.core.protocol.link.SessionStore
 import com.radiome.data.store.RoomSessionStore
 import com.radiome.feature.transceiver.link.LinkRecording
+import com.radiome.feature.transceiver.link.PositionBeacon
+import com.radiome.feature.transceiver.settings.GroupKeyProvider
 import com.radiome.feature.transceiver.settings.SettingsRepository
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +23,13 @@ class RadioMeApp : Application(), TransceiverService.DependenciesProvider {
     @Inject lateinit var settings: SettingsRepository
     @Inject lateinit var sessionStore: RoomSessionStore
     @Inject lateinit var recording: LinkRecording
+    @Inject lateinit var keys: GroupKeyProvider
+    @Inject lateinit var beacon: PositionBeacon
+
+    override fun onCreate() {
+        super.onCreate()
+        beacon.start()
+    }
 
     /** The service asks for this each time the link starts, so new settings apply on the next start or restart. */
     override fun transceiverDependencies(): TransceiverService.Dependencies {
@@ -36,6 +45,7 @@ class RadioMeApp : Application(), TransceiverService.DependenciesProvider {
             override val launchIntent: Intent = launch
             override val routePreference: RoutePreference = s.routePreference
             override val callsign: String = s.callsign
+            override val groupKey: ByteArray? = keys.current()?.encoded()
 
             override fun onLinkStarted(link: LinkController, scope: CoroutineScope) = rec.attach(link, scope)
 

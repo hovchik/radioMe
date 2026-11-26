@@ -3,6 +3,7 @@ package com.radiome.feature.transceiver.link
 import com.radiome.core.audio.RouteMode
 import com.radiome.core.audio.RoutePreference
 import com.radiome.core.dsp.modem.DemodTelemetry
+import com.radiome.core.protocol.crypto.GroupKey
 import com.radiome.core.protocol.link.LinkEvent
 import com.radiome.core.protocol.link.LinkState
 import com.radiome.core.protocol.link.TransferTelemetry
@@ -37,6 +38,9 @@ interface TransceiverClient {
     fun applyLive(route: RoutePreference, outputGain: Float)
     /** Callsign for the STATION frame on everything the running link sends. */
     fun setCallsign(callsign: String)
+
+    /** Group key for end-to-end encryption on the running link (null removes it). */
+    fun setGroupKey(key: GroupKey?)
 
     /** Start a two-station link test (see [com.radiome.core.protocol.link.LinkTest]). Null when the radio is off. */
     suspend fun startLinkTest(to: String?): Int?

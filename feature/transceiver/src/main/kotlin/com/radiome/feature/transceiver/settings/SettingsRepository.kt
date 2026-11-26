@@ -75,6 +75,9 @@ class SettingsRepository(
             imageProgressive = this[IMAGE_PROGRESSIVE] ?: d.imageProgressive,
             callsign = this[CALLSIGN] ?: d.callsign,
             quickMessages = this[QUICK]?.split(QUICK_SEPARATOR) ?: d.quickMessages,
+            encryptMessages = this[ENCRYPT] ?: d.encryptMessages,
+            beaconIntervalMin = this[BEACON_MIN] ?: d.beaconIntervalMin,
+            beaconProfile = enumOr(this[BEACON_PROFILE], d.beaconProfile),
         ).sanitized()
     }
 
@@ -97,6 +100,9 @@ class SettingsRepository(
         this[IMAGE_PROGRESSIVE] = s.imageProgressive
         this[CALLSIGN] = s.callsign
         this[QUICK] = s.quickMessages.joinToString(QUICK_SEPARATOR)
+        this[ENCRYPT] = s.encryptMessages
+        this[BEACON_MIN] = s.beaconIntervalMin
+        this[BEACON_PROFILE] = s.beaconProfile.name
     }
 
     private companion object {
@@ -117,6 +123,9 @@ class SettingsRepository(
         val IMAGE_PROGRESSIVE = booleanPreferencesKey("image_progressive")
         val CALLSIGN = stringPreferencesKey("callsign")
         val QUICK = stringPreferencesKey("quick_messages")
+        val ENCRYPT = booleanPreferencesKey("encrypt_messages")
+        val BEACON_MIN = intPreferencesKey("beacon_interval_min")
+        val BEACON_PROFILE = stringPreferencesKey("beacon_profile")
         const val QUICK_SEPARATOR = "\n"
 
         inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
