@@ -305,4 +305,42 @@ class TransceiverViewModelTest {
         assertEquals(ModemProfile.ROBUST, vm.compose.value.profile)
         assertTrue(vm.compose.value.auto)
     }
+
+    @Test
+    fun queuedEncryptedMessageIsDroppedWhenTheKeyIsGone() = runBlocking {
+        settings.update { it.copy(encryptMessages = true) }
+        waitUntil { vm.settings.value.encryptMessages }
+        keys.setPassphrase("correct horse battery")
+        vm.onDraftChange("sealed")
+        vm.queueText()
+        vm.onDraftChange("plain")
+        assertEquals(1, vm.queue.value.size)
+        settings.update { it.copy(encryptMessages = false) }
+        waitUntil { !vm.settings.value.encryptMessages }
+        vm.queueText()
+        assertTrue(vm.queue.value[0].options.encrypt)
+        assertFalse(vm.queue.value[1].options.encrypt)
+        keys.clear()
+
+        vm.startListening()
+        waitUntil { client.sent.size == 1 }
+        assertEquals("plain", client.sent.single().first.asText())
+        assertTrue(vm.queue.value.isEmpty())
+    }
+
+    @Test
+    fun queueMovesOnWhenTheRadioStopsMidTransfer() = runBlocking {
+        vm.onDraftChange("first")
+        vm.queueText()
+        vm.onDraftChange("second")
+        vm.queueText()
+        vm.startListening()
+        waitUntil { client.sent.size == 1 }
+        Thread.sleep(200) // the queue is now waiting for that transfer to finish
+
+        vm.stopListening()
+        vm.startListening()
+        waitUntil { client.sent.size == 2 }
+        assertEquals("second", client.sent[1].first.asText())
+    }
 }

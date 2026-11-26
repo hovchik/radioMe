@@ -220,11 +220,30 @@ class TransceiverViewModel @Inject constructor(
             client.transfers.first { m -> m.values.none { it.direction == Direction.OUTGOING && !Presenters.isFinished(it) } }
             if (_queue.value.firstOrNull()?.id != next.id) continue // removed while we waited
             val options = if (next.autoProfile) next.options.copy(profile = rate.current) else next.options
-            val sid = dispatch(next.payload, options)
-            if (sid == null) continue // the radio went off; try again when it is back
+            // The group key may have been removed since this was queued: drop it with a notice rather than send it in clear.
+            if (options.encrypt && keys.key.value == null) {
+                _queue.update { q -> q.filterNot { it.id == next.id } }
+                _messages.trySend("Removed \"${next.label}\" from the queue: it was to go encrypted, but no group key is set now.")
+                continue
+            }
+            val sid = try {
+                dispatch(next.payload, options)
+            } catch (e: IllegalStateException) {
+                _queue.update { q -> q.filterNot { it.id == next.id } }
+                _messages.trySend("Could not send \"${next.label}\": ${e.message}")
+                continue
+            } ?: continue // the radio went off; try again when it is back
             _queue.update { q -> q.filterNot { it.id == next.id } }
             withTimeoutOrNull(QUEUE_ITEM_TIMEOUT_MS) {
-                combine(client.transfers, ended) { m, done -> sid in done || m[sid]?.let(Presenters::isFinished) == true }.first { it }
+                // Done when it is delivered or failed, or when its link goes away (radio stopped or restarted), so the
+                // rest of the queue does not wait for the timeout.
+                var seen = false
+                combine(client.transfers, ended, client.running) { m, done, running ->
+                    val t = m[sid]
+                    val gone = seen && t == null
+                    if (t != null) seen = true
+                    sid in done || t?.let(Presenters::isFinished) == true || gone || !running
+                }.first { it }
             }
         }
     }
