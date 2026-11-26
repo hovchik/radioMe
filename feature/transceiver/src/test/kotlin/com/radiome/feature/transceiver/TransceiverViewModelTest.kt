@@ -157,7 +157,7 @@ class TransceiverViewModelTest {
     fun callsignAddresseeAndQuickMessagesGoIntoTheTransfer() = runBlocking {
         client.startListening()
         vm.updateSettings { it.copy(callsign = "ek1a") }
-        waitUntil { client.callsign == "EK1A" }
+        waitUntil { client.lastCallsign == "EK1A" }
         vm.onToChange("ek2b")
         vm.sendQuickMessage("Need help")
         waitUntil { client.sent.size == 1 }
