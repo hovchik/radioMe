@@ -16,8 +16,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -40,6 +44,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.radiome.feature.transceiver.map.MapLocation
 import com.radiome.feature.transceiver.map.OfflineMaps
 import com.radiome.feature.transceiver.settings.AppPermission
+import com.radiome.feature.transceiver.settings.Health
 import com.radiome.feature.transceiver.settings.PermissionAction
 import com.radiome.feature.transceiver.settings.PermissionRow
 import com.radiome.feature.transceiver.settings.PermissionStatus
@@ -116,18 +121,15 @@ private fun Context.openNotificationSettings() {
     )
 }
 
-/**
- * Lists each permission RadioMe uses with its current state and a button to grant or revoke it. The state is read
- * again whenever the screen resumes, so a change made on the system settings page shows up on return.
- *
- * @param onBeforeRevokeMicrophone turns the radio off before the microphone is taken away.
- */
+/** The permission rows as the system reports them now, and a way to read them again after a change. */
+class PermissionsState(val rows: List<PermissionRow>, val refresh: () -> Unit)
+
+/** Reads the permission rows, again whenever the screen resumes, so a change made in system settings shows on return. */
 @Composable
-fun PermissionsSection(onBeforeRevokeMicrophone: () -> Unit) {
+fun rememberPermissionsState(): PermissionsState {
     val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refresh++ }
-
     val rows = remember(refresh) {
         val activity = context.findActivity()
         permissionRows(
@@ -145,12 +147,25 @@ fun PermissionsSection(onBeforeRevokeMicrophone: () -> Unit) {
             }.toSet(),
         )
     }
+    return remember(rows) { PermissionsState(rows) { refresh++ } }
+}
 
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { refresh++ }
+/**
+ * Lists each permission RadioMe uses with its current state and a button to grant or revoke it.
+ *
+ * @param onBeforeRevokeMicrophone turns the radio off before the microphone is taken away.
+ */
+@Composable
+fun PermissionsSection(state: PermissionsState, onBeforeRevokeMicrophone: () -> Unit) {
+    val context = LocalContext.current
+    val rows = state.rows
+
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { state.refresh() }
     var revoking by remember { mutableStateOf<AppPermission?>(null) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        rows.forEach { row ->
+    Column {
+        rows.forEachIndexed { i, row ->
+            if (i > 0) RowDivider()
             PermissionRowView(row) {
                 when (row.action) {
                     PermissionAction.REQUEST -> row.permission.requestNames().takeIf { it.isNotEmpty() }?.let {
@@ -193,17 +208,26 @@ fun PermissionsSection(onBeforeRevokeMicrophone: () -> Unit) {
 
 @Composable
 private fun PermissionRowView(row: PermissionRow, onAction: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(tr(row.permission.title), style = MaterialTheme.typography.bodyLarge)
-            val (status, color) = when (row.status) {
-                PermissionStatus.GRANTED -> tr("Allowed") to MaterialTheme.colorScheme.primary
-                PermissionStatus.DENIED -> tr("Not allowed") to MaterialTheme.colorScheme.error
-                PermissionStatus.NOT_NEEDED -> tr("Not needed") to MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(tr(row.permission.title), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f, fill = false))
+                val (status, health) = when (row.status) {
+                    PermissionStatus.GRANTED -> tr("Allowed") to if (row.permission == AppPermission.LOCATION && row.note != null) Health.ATTENTION else Health.OK
+                    PermissionStatus.DENIED -> tr("Not allowed") to
+                        if (row.permission == AppPermission.MICROPHONE) Health.PROBLEM else Health.ATTENTION
+                    PermissionStatus.NOT_NEEDED -> tr("Not needed") to Health.IDLE
+                }
+                StatusPill(status, health)
             }
-            Text(status, style = MaterialTheme.typography.labelLarge, color = color)
             Text(tr(row.permission.purpose), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            row.note?.let { Text(tr(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            row.note?.let {
+                val color = if (row.status == PermissionStatus.DENIED) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                Text(tr(it), style = MaterialTheme.typography.bodySmall, color = color)
+            }
         }
         val label = when (row.action) {
             PermissionAction.REQUEST -> tr("Allow")
@@ -211,7 +235,14 @@ private fun PermissionRowView(row: PermissionRow, onAction: () -> Unit) {
             PermissionAction.REVOKE -> tr("Revoke")
             PermissionAction.NONE -> null
         }
-        label?.let { OutlinedButton(onClick = onAction) { Text(it) } }
+        label?.let {
+            Spacer(Modifier.width(8.dp))
+            if (row.status == PermissionStatus.DENIED) {
+                Button(onClick = onAction) { Text(it) }
+            } else {
+                OutlinedButton(onClick = onAction) { Text(it) }
+            }
+        }
     }
 }
 

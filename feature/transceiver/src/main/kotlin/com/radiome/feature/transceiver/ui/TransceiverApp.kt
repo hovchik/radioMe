@@ -44,6 +44,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radiome.core.protocol.payload.Files
 import com.radiome.feature.transceiver.TransceiverViewModel
+import com.radiome.feature.transceiver.settings.SettingsRadioStatus
 import com.radiome.feature.transceiver.share.HistoryExport
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -377,8 +378,14 @@ fun TransceiverApp(
                     keyBusy = keyBusy,
                     onSetPassphrase = viewModel::setGroupPassphrase,
                     onClearKey = { viewModel.clearGroupKey() },
-                    pttDevice = pttDevice,
                     modifier = modifier,
+                    radio = SettingsRadioStatus(
+                        running = radio.running,
+                        route = radio.route,
+                        restartPending = restartPending,
+                        pttDevice = pttDevice,
+                    ),
+                    actions = SettingsActions(onRestartLink = viewModel::restartLink, onTestTone = { viewModel.testTone() }, onAutoSpeed = viewModel::onAutoSpeed),
                 )
             }
         }

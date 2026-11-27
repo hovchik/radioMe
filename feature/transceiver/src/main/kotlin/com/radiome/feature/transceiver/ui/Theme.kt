@@ -31,15 +31,22 @@ object RadioColors {
     val pending = Color(0x33888888)
 }
 
+/**
+ * @param dynamicColor follow the wallpaper colours on Android 12+. Screenshot tests turn it off to show the app's
+ *   own green palette.
+ */
 @Composable
-fun RadioMeTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+fun RadioMeTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
+    content: @Composable () -> Unit,
+) {
     val scheme = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val ctx = LocalContext.current
-            if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+            if (darkTheme) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
         }
-        dark -> Dark
+        darkTheme -> Dark
         else -> Light
     }
     MaterialTheme(colorScheme = scheme, content = content)
