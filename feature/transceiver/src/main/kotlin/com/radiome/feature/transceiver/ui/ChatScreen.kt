@@ -34,7 +34,10 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Email
+import com.radiome.feature.transceiver.settings.Health
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -155,21 +158,33 @@ private fun ChatList(
     onOpen: (String?) -> Unit,
     modifier: Modifier,
 ) {
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
-        if (!running) item { RadioOffBanner(actions.onStartRadio, Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
+    val unread = threads.sumOf { it.unread }
+    LazyColumn(
+        modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (!running) item { RadioOffBanner(actions.onStartRadio) }
         item { NewChat(onOpen) }
-        items(threads, key = { it.key }) { t ->
-            ThreadRow(t, now) { onOpen(t.peer) }
-            HorizontalDivider(Modifier.padding(start = 72.dp))
+        item {
+            SectionTitle(
+                if (unread > 0) tr("Conversations · %d unread", unread) else tr("Conversations"),
+            )
         }
-        if (threads.size <= 1) {
-            item {
-                Text(
-                    tr("Stations you hear or exchange messages with show up here."),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(16.dp),
-                )
+        item {
+            ElevatedCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    threads.forEachIndexed { i, t ->
+                        if (i > 0) HorizontalDivider(Modifier.padding(start = 72.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                        ThreadRow(t, now) { onOpen(t.peer) }
+                    }
+                    if (threads.size <= 1) {
+                        HelpText(
+                            tr("Stations you hear or exchange messages with show up here."),
+                            Modifier.padding(start = 56.dp, bottom = 8.dp),
+                        )
+                    }
+                }
             }
         }
     }
@@ -177,27 +192,31 @@ private fun ChatList(
 
 @Composable
 private fun RadioOffBanner(onStart: () -> Unit, modifier: Modifier = Modifier) {
-    Card(modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(tr("The radio is off. Messages you write wait in the queue."), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = onStart) { Text(tr("Turn on")) }
-        }
-    }
+    NoticeCard(
+        RadioIcons.radio,
+        tr("The radio is off. Messages you write wait in the queue."),
+        Health.IDLE,
+        modifier,
+        actionLabel = tr("Turn on"),
+        onAction = onStart,
+    )
 }
 
 @Composable
 private fun NewChat(onOpen: (String?) -> Unit) {
     var callsign by rememberSaveable { mutableStateOf("") }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(
-            value = callsign,
-            onValueChange = { callsign = it.uppercase().filter { c -> c.isLetterOrDigit() || c == '/' || c == '-' }.take(10) },
-            label = { Text(tr("New chat with (callsign)")) },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(8.dp))
-        Button(onClick = { onOpen(callsign); callsign = "" }, enabled = callsign.isNotBlank()) { Text(tr("Open")) }
+    SettingsCard(icon = Icons.Filled.Add, title = tr("New conversation"), summary = tr("Type a callsign to write to one station.")) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = callsign,
+                onValueChange = { callsign = it.uppercase().filter { c -> c.isLetterOrDigit() || c == '/' || c == '-' }.take(10) },
+                label = { Text(tr("New chat with (callsign)")) },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(onClick = { onOpen(callsign); callsign = "" }, enabled = callsign.isNotBlank()) { Text(tr("Open")) }
+        }
     }
 }
 
@@ -205,7 +224,7 @@ private fun NewChat(onOpen: (String?) -> Unit) {
 private fun ThreadRow(t: ChatThread, now: Long, onClick: () -> Unit) {
     val title = t.peer ?: tr("All stations")
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Avatar(t.peer)
@@ -301,10 +320,20 @@ private fun Conversation(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(peer ?: tr("All stations"), style = MaterialTheme.typography.titleMedium)
-                    val sub = thread?.lastHeardMs?.let { tr("Heard %s", Presenters.formatAge(now - it)) }
-                        ?: if (peer == null) tr("Everyone on this frequency") else tr("Not heard yet")
-                    Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        if (peer == null) tr("Everyone on this frequency") else tr("One station"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
+                val heardAt = thread?.lastHeardMs
+                if (heardAt != null) {
+                    // Heard in the last 15 minutes: likely still in range.
+                    StatusPill(tr("Heard %s", Presenters.formatAge(now - heardAt)), if (now - heardAt < 15 * 60_000L) Health.OK else Health.IDLE)
+                } else if (peer != null) {
+                    StatusPill(tr("Not heard yet"), Health.IDLE)
+                }
+                Spacer(Modifier.width(8.dp))
             }
         }
         LazyColumn(
@@ -315,12 +344,7 @@ private fun Conversation(
         ) {
             if (messages.isEmpty() && waiting.isEmpty()) {
                 item {
-                    Text(
-                        tr("No messages yet. Write the first one below."),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth().padding(24.dp),
-                    )
+                    EmptyState(Icons.Filled.Email, tr("No messages yet"), tr("No messages yet. Write the first one below."))
                 }
             }
             items(messages, key = { it.id }) { r ->
@@ -328,7 +352,7 @@ private fun Conversation(
             }
             items(waiting, key = { "q${it.id}" }) { q -> QueuedBubble(q, actions.onRemoveQueued) }
         }
-        if (!running) RadioOffBanner(actions.onStartRadio, Modifier.padding(horizontal = 8.dp))
+        if (!running) RadioOffBanner(actions.onStartRadio, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
         Composer(compose, running, quickMessages, actions, queueActions, fileActions, voiceActions)
     }
 }
@@ -385,7 +409,11 @@ private fun Bubble(
                 if (r.payload != null && (r.contentType?.isImage == true || r.contentType == ContentType.BINARY)) {
                     DropdownMenuItem(text = { Text(tr("Save as file")) }, onClick = { menu = false; historyActions.onSave(r) })
                 }
-                DropdownMenuItem(text = { Text(tr("Delete")) }, onClick = { menu = false; historyActions.onDelete(r.id) })
+                DropdownMenuItem(
+                    text = { Text(tr("Delete")) },
+                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                    onClick = { menu = false; historyActions.onDelete(r.id) },
+                )
             }
         }
     }
@@ -503,10 +531,22 @@ private fun TextComposer(
         Box {
             IconButton(onClick = { attach = true }) { Icon(Icons.Filled.Add, contentDescription = tr("Attach")) }
             DropdownMenu(expanded = attach, onDismissRequest = { attach = false }) {
-                DropdownMenuItem(text = { Text(tr("Image")) }, onClick = { attach = false; actions.onPickImage() })
-                DropdownMenuItem(text = { Text(tr("File")) }, onClick = { attach = false; fileActions.onPick() })
+                DropdownMenuItem(
+                    text = { Text(tr("Image")) },
+                    leadingIcon = { Icon(RadioIcons.image, contentDescription = null) },
+                    onClick = { attach = false; actions.onPickImage() },
+                )
+                DropdownMenuItem(
+                    text = { Text(tr("File")) },
+                    leadingIcon = { Icon(RadioIcons.file, contentDescription = null) },
+                    onClick = { attach = false; fileActions.onPick() },
+                )
                 if (compose.voiceAvailable) {
-                    DropdownMenuItem(text = { Text(tr("Voice")) }, onClick = { attach = false; voiceActions.onRecord() })
+                    DropdownMenuItem(
+                        text = { Text(tr("Voice")) },
+                        leadingIcon = { Icon(RadioIcons.mic, contentDescription = null) },
+                        onClick = { attach = false; voiceActions.onRecord() },
+                    )
                 }
             }
         }

@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,9 +60,9 @@ fun WaterfallCard(rows: Flow<FloatArray>, modifier: Modifier = Modifier) {
         }
         }
     }
-    Card(modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(tr("Waterfall"), style = MaterialTheme.typography.titleSmall)
+    ElevatedCard(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(tr("Waterfall"), style = MaterialTheme.typography.titleMedium)
             val image = bitmap?.asImageBitmap()
             Canvas(Modifier.fillMaxWidth().height(120.dp).semantics { contentDescription = tr("Live spectrum of the received audio") }) {
                 tick // redraw on every new row

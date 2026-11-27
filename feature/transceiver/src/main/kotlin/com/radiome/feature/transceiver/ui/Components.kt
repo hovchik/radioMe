@@ -17,7 +17,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Card
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilledTonalButton
+import com.radiome.feature.transceiver.settings.Health
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -125,29 +129,44 @@ fun TransferCardView(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    ElevatedCard(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val arrow = if (card.direction == Direction.OUTGOING) tr("Sending") else tr("Receiving")
-                val who = when {
-                    card.direction == Direction.INCOMING -> card.peer?.let { " from $it" } ?: ""
-                    else -> " to " + (card.peer ?: "all")
+                val outgoing = card.direction == Direction.OUTGOING
+                IconBadge(if (outgoing) Icons.AutoMirrored.Filled.Send else Icons.Filled.Email)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        card.name.ifBlank { card.sessionLabel },
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val who = when {
+                        !outgoing -> card.peer?.let { tr("From %s", it) } ?: tr("Receiving")
+                        else -> card.peer?.let { tr("To %s", it) } ?: tr("To all stations")
+                    }
+                    Text(who, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
-                Text(
-                    "$arrow ${card.name.ifBlank { card.sessionLabel }}$who",
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                AssistChip(onClick = {}, label = { Text(phaseLabel(card.phase)) })
+                Spacer(Modifier.width(8.dp))
+                StatusPill(phaseLabel(card.phase), phaseHealth(card.phase))
             }
-            LinearProgressIndicator(progress = { card.progress }, modifier = Modifier.fillMaxWidth())
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LinearProgressIndicator(progress = { card.progress }, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(12.dp))
+                Text("${(card.progress * 100).toInt()}%", style = MaterialTheme.typography.labelLarge)
+            }
             card.preview?.let { ProgressivePreview(it, Modifier.size(160.dp)) }
             ChunkGrid(card.chunkStates)
             // Fixed set of single-line rows: numbers change while chunks arrive, the card's height does not.
             val snr = if (card.snrDb.isNaN()) "-" else "%.1f dB".format(card.snrDb)
-            StatLine("${card.receivedChunks}/${card.totalChunks} chunks · loss %.1f%% · SNR $snr".format(card.lossPercent))
+            MetricRow(
+                listOf(
+                    tr("Chunks") to "${card.receivedChunks}/${card.totalChunks}",
+                    tr("Loss") to "%.1f%%".format(card.lossPercent),
+                    "SNR" to snr,
+                ),
+            )
             StatLine("FEC fixed ${card.fecCorrectedBytes} B in ${card.fecRepairedChunks} chunks · repair rounds ${card.repairRounds}")
             val missing = if (card.missing.isEmpty()) tr("Missing: none") else
                 "Missing ${card.missing.size}: " + card.missing.take(12).joinToString(", ") + if (card.missing.size > 12) " ..." else ""
@@ -156,15 +175,15 @@ fun TransferCardView(
             // Keeps its height when the buttons come and go.
             Row(Modifier.heightIn(min = 40.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (card.canRequestCorrections) {
-                    OutlinedButton(onClick = onRequestCorrections) {
-                        Icon(Icons.Filled.Refresh, contentDescription = null)
+                    FilledTonalButton(onClick = onRequestCorrections) {
+                        Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(tr("Send correction request"))
                     }
                 }
                 if (card.canCancel) {
                     TextButton(onClick = onCancel) {
-                        Icon(Icons.Filled.Close, contentDescription = null)
+                        Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(tr("Cancel"))
                     }
@@ -172,6 +191,15 @@ fun TransferCardView(
             }
         }
     }
+}
+
+/** Status colour for a transfer phase. */
+fun phaseHealth(phase: String): Health = when (phase) {
+    "COMPLETE" -> Health.OK
+    "AWAITING_REPAIR", "AWAITING_RESPONSE" -> Health.ATTENTION
+    "CORRUPT", "FAILED" -> Health.PROBLEM
+    "CANCELLED" -> Health.IDLE
+    else -> Health.OK
 }
 
 @Composable
