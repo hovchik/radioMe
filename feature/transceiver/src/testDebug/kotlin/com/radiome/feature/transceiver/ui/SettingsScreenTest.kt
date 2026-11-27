@@ -77,11 +77,11 @@ class SettingsScreenTest {
     private fun snap(name: String) {
         compose.waitForIdle()
         // Screenshots are for review only: a capture failure must not hide what the test checks.
+        val dir = File(System.getProperty("user.dir"), "build/outputs/screenshots").apply { mkdirs() }
         runCatching {
-            val dir = File(System.getProperty("user.dir"), "build/outputs/screenshots").apply { mkdirs() }
             val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
             File(dir, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        }.onFailure { println("Screenshot $name not saved: $it") }
+        }.onFailure { File(dir, "$name.error.txt").writeText(it.stackTraceToString()) }
     }
 
     private fun scrollTo(text: String) {
