@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.Button
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Card
@@ -38,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,6 +64,7 @@ import com.radiome.feature.transceiver.LinkTestUi
 import com.radiome.feature.transceiver.QueuedItem
 import com.radiome.feature.transceiver.Presenters
 import com.radiome.feature.transceiver.RadioUi
+import com.radiome.feature.transceiver.link.Repeat
 import kotlin.math.roundToInt
 
 @Composable
@@ -144,6 +147,8 @@ class QueueActions(
     val onQueueText: () -> Unit,
     val onQueueImage: () -> Unit,
     val onRemove: (Long) -> Unit,
+    /** Schedules whatever is in the composer for a later time. */
+    val onSchedule: ((at: Long, repeat: Repeat) -> Unit)? = null,
 )
 
 @Composable
@@ -328,6 +333,15 @@ private fun ComposeCard(
     fileActions: FileActions,
     voiceActions: VoiceActions,
 ) {
+    var scheduling by remember { mutableStateOf(false) }
+    val scheduleSink = queueActions.onSchedule
+    if (scheduling && scheduleSink != null) {
+        ScheduleDraftDialog(onDismiss = { scheduling = false }, onSchedule = { at, repeat ->
+            scheduling = false
+            scheduleSink(at, repeat)
+        })
+    }
+    val onSchedule: (() -> Unit)? = if (scheduleSink != null) ({ scheduling = true }) else null
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(tr("Send"), style = MaterialTheme.typography.titleMedium)
@@ -360,7 +374,7 @@ private fun ComposeCard(
             val image = compose.image
             val file = compose.file
             if (file != null) {
-                FileDraft(file, compose.sending, running, fileActions)
+                FileDraft(file, compose.sending, running, fileActions, onSchedule)
                 return@Column
             }
             if (compose.recording.active) {
@@ -368,7 +382,7 @@ private fun ComposeCard(
                 return@Column
             }
             compose.voice?.let {
-                VoiceDraft(it, compose.sending, running, voiceActions)
+                VoiceDraft(it, compose.sending, running, voiceActions, onSchedule)
                 return@Column
             }
             if (image == null && quickMessages.isNotEmpty()) {
@@ -413,6 +427,11 @@ private fun ComposeCard(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.weight(1f))
+                    if (onSchedule != null) {
+                        IconButton(onClick = onSchedule, enabled = compose.draft.isNotBlank()) {
+                            Icon(Icons.Filled.DateRange, contentDescription = tr("Schedule"))
+                        }
+                    }
                     OutlinedButton(onClick = queueActions.onQueueText, enabled = compose.draft.isNotBlank()) { Text(tr("Queue")) }
                     Button(onClick = onSendText, enabled = running && compose.draft.isNotBlank() && !compose.sending) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
@@ -421,7 +440,7 @@ private fun ComposeCard(
                     }
                 }
             } else {
-                ImageDraft(image, compose.sending, running, onImagePreset, onClearImage, onSendImage, queueActions.onQueueImage)
+                ImageDraft(image, compose.sending, running, onImagePreset, onClearImage, onSendImage, queueActions.onQueueImage, onSchedule)
             }
         }
     }
@@ -442,7 +461,7 @@ internal fun Recording(recording: RecordingUi, actions: VoiceActions) {
 }
 
 @Composable
-internal fun VoiceDraft(voice: VoiceDraftUi, sending: Boolean, running: Boolean, actions: VoiceActions) {
+internal fun VoiceDraft(voice: VoiceDraftUi, sending: Boolean, running: Boolean, actions: VoiceActions, onSchedule: (() -> Unit)? = null) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = actions.onPlay) { Icon(Icons.Filled.PlayArrow, contentDescription = tr("Play")) }
         Text(
@@ -461,10 +480,11 @@ internal fun VoiceDraft(voice: VoiceDraftUi, sending: Boolean, running: Boolean,
         Text(tr("Send voice note"))
     }
     OutlinedButton(onClick = actions.onQueue, modifier = Modifier.fillMaxWidth()) { Text(tr("Add voice note to queue")) }
+    ScheduleButton(onSchedule)
 }
 
 @Composable
-internal fun FileDraft(file: FileDraftUi, sending: Boolean, running: Boolean, actions: FileActions) {
+internal fun FileDraft(file: FileDraftUi, sending: Boolean, running: Boolean, actions: FileActions, onSchedule: (() -> Unit)? = null) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(file.name, style = MaterialTheme.typography.titleSmall)
@@ -492,6 +512,7 @@ internal fun FileDraft(file: FileDraftUi, sending: Boolean, running: Boolean, ac
         Text(tr("Send file"))
     }
     OutlinedButton(onClick = actions.onQueue, modifier = Modifier.fillMaxWidth()) { Text(tr("Add file to queue")) }
+    ScheduleButton(onSchedule)
 }
 
 @Composable
@@ -503,6 +524,7 @@ internal fun ImageDraft(
     onClearImage: () -> Unit,
     onSendImage: () -> Unit,
     onQueueImage: () -> Unit,
+    onSchedule: (() -> Unit)? = null,
 ) {
     Row(verticalAlignment = Alignment.Top) {
         if (image.bytes != null) {
@@ -562,6 +584,18 @@ internal fun ImageDraft(
     }
     OutlinedButton(onClick = onQueueImage, enabled = image.bytes != null && !image.busy, modifier = Modifier.fillMaxWidth()) {
         Text(tr("Add image to queue"))
+    }
+    ScheduleButton(onSchedule, enabled = image.bytes != null && !image.busy)
+}
+
+/** "Schedule…" under a draft; absent where scheduling is not offered. */
+@Composable
+private fun ScheduleButton(onSchedule: (() -> Unit)?, enabled: Boolean = true) {
+    if (onSchedule == null) return
+    OutlinedButton(onClick = onSchedule, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Filled.DateRange, contentDescription = null)
+        Spacer(Modifier.width(6.dp))
+        Text(tr("Schedule for later"))
     }
 }
 

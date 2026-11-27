@@ -9,6 +9,8 @@ import com.radiome.data.PositionRepository
 import com.radiome.data.TransferRepository
 import com.radiome.feature.transceiver.link.PositionBeacon
 import com.radiome.feature.transceiver.link.PositionHistory
+import com.radiome.feature.transceiver.link.FileScheduleStore
+import com.radiome.feature.transceiver.link.ScheduledSender
 import com.radiome.feature.transceiver.link.RoomPositionHistory
 import com.radiome.feature.transceiver.location.AndroidLocationSource
 import com.radiome.feature.transceiver.location.LocationSource
@@ -81,6 +83,16 @@ object AppModule {
         location: LocationSource,
         @AppScope scope: CoroutineScope,
     ): PositionBeacon = PositionBeacon(client, settings, keys, location, scope)
+
+    @Provides @Singleton
+    fun scheduledSender(
+        @ApplicationContext context: Context,
+        client: TransceiverClient,
+        settings: SettingsRepository,
+        keys: GroupKeyProvider,
+        beacon: PositionBeacon,
+        @AppScope scope: CoroutineScope,
+    ): ScheduledSender = ScheduledSender(client, settings, keys, beacon, FileScheduleStore(context.filesDir.resolve("scheduled.bin")), scope)
 
     @Provides @Singleton
     fun voiceNotes(@ApplicationContext context: Context): VoiceNotes = AndroidVoiceNotes(context)

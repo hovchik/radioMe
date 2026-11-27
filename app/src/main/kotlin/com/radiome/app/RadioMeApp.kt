@@ -12,6 +12,7 @@ import com.radiome.core.protocol.link.SessionStore
 import com.radiome.data.store.RoomSessionStore
 import com.radiome.feature.transceiver.link.LinkRecording
 import com.radiome.feature.transceiver.link.PositionBeacon
+import com.radiome.feature.transceiver.link.ScheduledSender
 import com.radiome.feature.transceiver.settings.GroupKeyProvider
 import com.radiome.feature.transceiver.settings.SettingsRepository
 import dagger.hilt.android.HiltAndroidApp
@@ -25,10 +26,13 @@ class RadioMeApp : Application(), TransceiverService.DependenciesProvider {
     @Inject lateinit var recording: LinkRecording
     @Inject lateinit var keys: GroupKeyProvider
     @Inject lateinit var beacon: PositionBeacon
+    @Inject lateinit var scheduler: ScheduledSender
 
     override fun onCreate() {
         super.onCreate()
         beacon.start()
+        // Scheduled messages go out even when the radio was started from the widget and no screen is open.
+        scheduler.start()
         // A new process means the radio is off, even if the last one was killed without stopping the link (Task
         // Manager, low memory): put the widget and the tile back to "off" so they offer Start again.
         RadioControls.onRunningChanged(this, false)

@@ -30,6 +30,9 @@ import com.radiome.feature.transceiver.link.TransceiverClient
 import com.radiome.feature.transceiver.link.TransferHistory
 import com.radiome.feature.transceiver.link.PositionBeacon
 import com.radiome.feature.transceiver.link.PositionHistory
+import com.radiome.feature.transceiver.link.Repeat
+import com.radiome.feature.transceiver.link.ScheduledMessage
+import com.radiome.feature.transceiver.link.ScheduledSender
 import com.radiome.feature.transceiver.map.MapGeo
 import com.radiome.feature.transceiver.settings.GroupKeyProvider
 import com.radiome.core.protocol.crypto.GroupKey
@@ -55,6 +58,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 @HiltViewModel
@@ -67,6 +71,7 @@ class TransceiverViewModel @Inject constructor(
     private val keys: GroupKeyProvider,
     private val beacon: PositionBeacon,
     private val voice: VoiceNotes,
+    private val scheduler: ScheduledSender,
 ) : ViewModel() {
     /** Where image work (resize, WebP encode) runs. Tests replace it. */
     internal var workDispatcher: CoroutineDispatcher = Dispatchers.Default
@@ -150,15 +155,123 @@ class TransceiverViewModel @Inject constructor(
 
     /** Send a failed or cancelled message again, to the same station, with the profile chosen now. */
     fun resend(r: TransferRecord) {
-        val bytes = r.payload ?: return
-        val type = r.contentType ?: return
+        val payload = resendPayload(r) ?: return
         if (!encryptionReady()) return
         viewModelScope.launch {
             warnIfMuted()
-            var options = settings.value.transferOptions(_compose.value.profile, r.peer)
-            if (type != ContentType.TEXT && type != ContentType.BINARY) options = options.copy(compression = CompressionMode.NEVER)
-            if (dispatch(Payload(type, bytes, r.name), options) == null) _messages.trySend(tr("Turn the radio on first."))
+            if (dispatch(payload, resendOptions(r)) == null) {
+                _messages.trySend(tr("Turn the radio on first."))
+            } else {
+                _resent.update { it + r.id }
+            }
         }
+    }
+
+    // ------------------------------------------------------------------------------------------ history
+
+    private val _resent = MutableStateFlow<Set<Long>>(emptySet())
+    /** History records sent again from this screen (so "Resend all failed" does not send them twice). */
+    val resent: StateFlow<Set<Long>> = _resent.asStateFlow()
+
+    private fun resendPayload(r: TransferRecord): Payload? {
+        val bytes = r.payload ?: return null
+        val type = r.contentType ?: return null
+        return Payload(type, bytes, r.name)
+    }
+
+    private fun resendOptions(r: TransferRecord): TransferOptions {
+        var options = settings.value.transferOptions(_compose.value.profile, r.peer)
+        val type = r.contentType
+        if (type != ContentType.TEXT && type != ContentType.BINARY) options = options.copy(compression = CompressionMode.NEVER)
+        return options
+    }
+
+    /** Every failed message not sent again yet goes into the queue, oldest first, to go out one after another. */
+    fun resendAllFailed() = viewModelScope.launch {
+        val failed = History.toResend(history.observe().first(), _resent.value)
+        if (failed.isEmpty()) {
+            _messages.trySend(tr("No failed messages to send again."))
+            return@launch
+        }
+        if (!encryptionReady()) return@launch
+        val auto = _compose.value.auto
+        for (r in failed) {
+            val payload = resendPayload(r) ?: continue
+            _queue.update { it + QueuedItem(++queueIds, History.label(r), payload, resendOptions(r), auto) }
+        }
+        _resent.update { it + failed.map { r -> r.id } }
+        _messages.trySend(
+            if (client.running.value) tr("%d failed messages are going out again, one after another.", failed.size)
+            else tr("%d failed messages queued. They go out when the radio is on.", failed.size),
+        )
+    }
+
+    /** Removes every failed or cancelled outgoing record from the history. */
+    fun deleteFailed() = viewModelScope.launch {
+        val ids = history.observe().first().filter { History.matches(it, HistoryFilter.FAILED) }.map { it.id }
+        ids.forEach { history.delete(it) }
+        _messages.trySend(tr("Removed %d failed messages from the history.", ids.size))
+    }
+
+    // ------------------------------------------------------------------------------------------ scheduled sending
+
+    /** Messages waiting for their time, soonest first. */
+    val scheduled: StateFlow<List<ScheduledMessage>> get() = scheduler.items
+
+    /** Schedules what is in the composer (file, voice note, image or text) instead of sending it now. */
+    fun scheduleDraft(at: Long, repeat: Repeat) {
+        val c = _compose.value
+        if (!encryptionReady()) return
+        val profile = if (c.auto) null else c.profile
+        val file = filePayload()
+        val note = voiceNote
+        val image = prepared
+        val (label, payload) = when {
+            file != null -> "${file.name}, ${Presenters.formatBytes(file.bytes.size)}" to file
+            note != null -> tr("Voice note %d s", seconds(note.durationMs())) to note.toPayload()
+            c.image != null && image != null && !c.image.busy ->
+                "Image ${image.width}x${image.height}, ${Presenters.formatBytes(image.sizeBytes)}" to image.payload
+            c.image == null && c.draft.isNotBlank() -> c.draft.take(40) to Payload.text(c.draft)
+            else -> return
+        }
+        when {
+            file != null -> clearFile()
+            note != null -> clearVoice()
+            c.image != null -> clearImage()
+            else -> _compose.update { it.copy(draft = "", textEstimate = null) }
+        }
+        scheduler.add(label, payload, c.to, profile, at, repeat)
+        _messages.trySend(scheduledNotice(at, repeat))
+    }
+
+    /** A text written in the History tab's schedule dialog. */
+    fun scheduleText(text: String, to: String, at: Long, repeat: Repeat) {
+        if (text.isBlank() || !encryptionReady()) return
+        val c = _compose.value
+        scheduler.add(text.take(40), Payload.text(text), to, if (c.auto) null else c.profile, at, repeat)
+        _messages.trySend(scheduledNotice(at, repeat))
+    }
+
+    /** This phone's position, read when it is due. Positions always go encrypted, to every station. */
+    fun schedulePosition(at: Long, repeat: Repeat) {
+        if (keys.key.value == null) {
+            _messages.trySend(Presenters.beaconMessage(PositionBeacon.Result.NoKey))
+            return
+        }
+        scheduler.add(tr("My position"), null, "", null, at, repeat)
+        _messages.trySend(scheduledNotice(at, repeat))
+    }
+
+    fun cancelScheduled(id: Long) = scheduler.remove(id)
+
+    fun sendScheduledNow(id: Long) {
+        scheduler.sendNow(id)
+        if (!client.running.value) _messages.trySend(tr("It goes out when the radio is on."))
+    }
+
+    private fun scheduledNotice(at: Long, repeat: Repeat): String {
+        val time = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(at))
+        return if (repeat == Repeat.ONCE) tr("Scheduled for %s.", time) else tr("Scheduled for %s, then %s.", time, History.repeatLabel(repeat).lowercase())
     }
 
     private val _linkTest = MutableStateFlow(LinkTestUi())
@@ -200,6 +313,7 @@ class TransceiverViewModel @Inject constructor(
 
     fun onAutoSpeed(on: Boolean) {
         _compose.update { it.copy(auto = on) }
+        scheduler.autoProfile = if (on) rate.current else null
         if (on) onProfileChange(rate.current, keepAuto = true)
         viewModelScope.launch { settingsRepository.update { it.copy(adaptiveSpeed = on) } }
     }
@@ -259,35 +373,46 @@ class TransceiverViewModel @Inject constructor(
         while (true) {
             val next = _queue.first { it.isNotEmpty() }.first()
             client.running.first { it }
-            // One at a time: wait until none of our transfers is still on air or waiting for its answer.
-            client.transfers.first { m -> m.values.none { it.direction == Direction.OUTGOING && !Presenters.isFinished(it) } }
-            if (_queue.value.firstOrNull()?.id != next.id) continue // removed while we waited
-            val options = if (next.autoProfile) next.options.copy(profile = rate.current) else next.options
-            // The group key may have been removed since this was queued: drop it with a notice rather than send it in clear.
-            if (options.encrypt && keys.key.value == null) {
-                _queue.update { q -> q.filterNot { it.id == next.id } }
-                _messages.trySend(tr("Removed \"%s\" from the queue: it was to go encrypted, but no group key is set now.", next.label))
-                continue
-            }
-            val sid = try {
-                dispatch(next.payload, options)
-            } catch (e: IllegalStateException) {
-                _queue.update { q -> q.filterNot { it.id == next.id } }
-                _messages.trySend(tr("Could not send \"%s\": %s", next.label, e.message ?: ""))
-                continue
-            } ?: continue // the radio went off; try again when it is back
+            // Shared with scheduled messages, so the two never both find the link idle and send at once.
+            val sid = scheduler.sendLock.withLock { sendNext(next) } ?: continue
+            awaitEnd(sid)
+        }
+    }
+
+    /** Sends the queue's [next] item once the link is idle; null when it was not sent and the loop should go round. */
+    private suspend fun sendNext(next: QueuedItem): Int? {
+        // One at a time: wait until none of our transfers is still on air or waiting for its answer.
+        client.transfers.first { m -> m.values.none { it.direction == Direction.OUTGOING && !Presenters.isFinished(it) } }
+        if (_queue.value.firstOrNull()?.id != next.id) return null // removed while we waited
+        val options = if (next.autoProfile) next.options.copy(profile = rate.current) else next.options
+        // The group key may have been removed since this was queued: drop it with a notice rather than send it in clear.
+        if (options.encrypt && keys.key.value == null) {
             _queue.update { q -> q.filterNot { it.id == next.id } }
-            withTimeoutOrNull(QUEUE_ITEM_TIMEOUT_MS) {
-                // Done when it is delivered or failed, or when its link goes away (radio stopped or restarted), so the
-                // rest of the queue does not wait for the timeout.
-                var seen = false
-                combine(client.transfers, ended, client.running) { m, done, running ->
-                    val t = m[sid]
-                    val gone = seen && t == null
-                    if (t != null) seen = true
-                    sid in done || t?.let(Presenters::isFinished) == true || gone || !running
-                }.first { it }
-            }
+            _messages.trySend(tr("Removed \"%s\" from the queue: it was to go encrypted, but no group key is set now.", next.label))
+            return null
+        }
+        val sid = try {
+            dispatch(next.payload, options)
+        } catch (e: IllegalStateException) {
+            _queue.update { q -> q.filterNot { it.id == next.id } }
+            _messages.trySend(tr("Could not send \"%s\": %s", next.label, e.message ?: ""))
+            return null
+        } ?: return null // the radio went off; try again when it is back
+        _queue.update { q -> q.filterNot { it.id == next.id } }
+        return sid
+    }
+
+    private suspend fun awaitEnd(sid: Int) {
+        withTimeoutOrNull(QUEUE_ITEM_TIMEOUT_MS) {
+            // Done when it is delivered or failed, or when its link goes away (radio stopped or restarted), so the
+            // rest of the queue does not wait for the timeout.
+            var seen = false
+            combine(client.transfers, ended, client.running) { m, done, running ->
+                val t = m[sid]
+                val gone = seen && t == null
+                if (t != null) seen = true
+                sid in done || t?.let(Presenters::isFinished) == true || gone || !running
+            }.first { it }
         }
     }
 
@@ -482,6 +607,7 @@ class TransceiverViewModel @Inject constructor(
             viewModelScope.launch { settingsRepository.update { it.copy(adaptiveSpeed = false) } }
         }
         _compose.update { it.copy(profile = profile, auto = it.auto && keepAuto, textEstimate = estimate(it.draft, profile)) }
+        scheduler.autoProfile = if (_compose.value.auto) profile else null
         voiceNote?.let { n ->
             _compose.update { it.copy(voice = it.voice?.copy(estimate = Presenters.bytesEstimate(n.encode(), voiceOptions(it), airtime))) }
         }
@@ -810,8 +936,11 @@ class TransceiverViewModel @Inject constructor(
             if (!profileChosen) {
                 _compose.update { it.copy(profile = s.defaultProfile, auto = s.adaptiveSpeed, textEstimate = estimate(it.draft, s.defaultProfile)) }
             }
+            scheduler.autoProfile = if (_compose.value.auto) rate.current else null
         }
         viewModelScope.launch { runQueue() }
+        scheduler.start()
+        viewModelScope.launch { scheduler.notices.collect { _messages.trySend(it) } }
     }
 
     private companion object {
