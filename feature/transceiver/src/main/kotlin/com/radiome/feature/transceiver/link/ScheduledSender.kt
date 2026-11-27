@@ -56,6 +56,8 @@ data class ScheduledMessage(
     val profile: ModemProfile?,
     val dueAt: Long,
     val repeat: Repeat = Repeat.ONCE,
+    /** Encryption was on when it was scheduled: it never goes out in clear, even if encryption is turned off since. */
+    val encrypt: Boolean = false,
 ) {
     val isPosition: Boolean get() = payload == null
 
@@ -99,7 +101,7 @@ class FileScheduleStore(private val file: File) : ScheduleStore {
 }
 
 internal object ScheduleCodec {
-    private const val VERSION = 1
+    private const val VERSION = 2
 
     fun encode(items: List<ScheduledMessage>): ByteArray {
         val bytes = ByteArrayOutputStream()
@@ -113,6 +115,7 @@ internal object ScheduleCodec {
                 out.writeUTF(m.profile?.name ?: "")
                 out.writeLong(m.dueAt)
                 out.writeUTF(m.repeat.name)
+                out.writeBoolean(m.encrypt)
                 val p = m.payload
                 out.writeInt(p?.type?.code ?: 0)
                 if (p != null) {
@@ -135,13 +138,14 @@ internal object ScheduleCodec {
             val dueAt = input.readLong()
             val repeatName = input.readUTF()
             val repeat = Repeat.entries.firstOrNull { it.name == repeatName } ?: Repeat.ONCE
+            val encrypt = input.readBoolean()
             val code = input.readInt()
             val payload = if (code == 0) null else {
                 val name = input.readUTF()
                 val bytes = ByteArray(input.readInt()).also { input.readFully(it) }
                 Payload(requireNotNull(ContentType.fromCode(code)), bytes, name)
             }
-            ScheduledMessage(id, label, payload, to, profile, dueAt, repeat)
+            ScheduledMessage(id, label, payload, to, profile, dueAt, repeat, encrypt)
         }
     }
 }
@@ -175,6 +179,12 @@ class ScheduledSender(
     @Volatile var autoProfile: ModemProfile? = null
 
     private val lock = Mutex()
+
+    /**
+     * Held from "nothing of ours is on the air" until the next send has started, by this and by the screen's queue,
+     * so the two never both see the link idle and start two transfers at once.
+     */
+    val sendLock = Mutex()
     private val loaded = MutableStateFlow(false)
     private var job: Job? = null
 
@@ -197,7 +207,8 @@ class ScheduledSender(
         dueAt: Long,
         repeat: Repeat = Repeat.ONCE,
     ): ScheduledMessage {
-        val m = ScheduledMessage(newId(), label, payload, to.trim().uppercase(), profile, dueAt, repeat)
+        val encrypt = payload != null && settings.settings.value.encryptMessages
+        val m = ScheduledMessage(newId(), label, payload, to.trim().uppercase(), profile, dueAt, repeat, encrypt)
         change { it + m }
         return m
     }
@@ -230,10 +241,12 @@ class ScheduledSender(
                 next ?: return@collectLatest
                 val wait = next.dueAt - clock()
                 if (wait > 0) delay(wait)
-                // One at a time with the queue and the other schedules: wait for our own transfers to finish.
-                client.transfers.first { m -> m.values.none { it.direction == Direction.OUTGOING && !Presenters.isFinished(it) } }
-                // Not cancelled half way by a list change: a message sent but not taken off would go out twice.
-                withContext(NonCancellable) { fire(next) }
+                sendLock.withLock {
+                    // One at a time with the queue and the other schedules: wait for our own transfers to finish.
+                    client.transfers.first { m -> m.values.none { it.direction == Direction.OUTGOING && !Presenters.isFinished(it) } }
+                    // Not cancelled half way by a list change: a message sent but not taken off would go out twice.
+                    withContext(NonCancellable) { fire(next) }
+                }
             }
     }
 
@@ -263,6 +276,7 @@ class ScheduledSender(
         }
         val s = settings.settings.value
         var options = s.transferOptions(m.profile ?: autoProfile ?: s.defaultProfile, m.to)
+        if (m.encrypt) options = options.copy(encrypt = true)
         if (payload.type != ContentType.TEXT && payload.type != ContentType.BINARY) options = options.copy(compression = CompressionMode.NEVER)
         if (options.encrypt && keys.key.value == null) {
             return tr("Did not send scheduled \"%s\": encryption is on but no group key is set.", m.label)

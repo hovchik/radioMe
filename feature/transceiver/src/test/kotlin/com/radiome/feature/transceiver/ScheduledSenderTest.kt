@@ -118,10 +118,22 @@ class ScheduledSenderTest {
     }
 
     @Test
+    fun messageScheduledEncryptedStaysEncryptedWhenEncryptionIsTurnedOff() = runBlocking {
+        keys.setPassphrase("correct horse battery")
+        settings.update { it.copy(encryptMessages = true) }
+        sender.start()
+        sender.add("secret", Payload.text("secret"), "", null, System.currentTimeMillis() + 100)
+        settings.update { it.copy(encryptMessages = false) }
+        client.startListening()
+        waitUntil { client.sent.size == 1 }
+        assertTrue(client.sent.single().second.encrypt)
+    }
+
+    @Test
     fun savedListSurvivesARestart() = runBlocking {
         val file = tmp.newFolder().resolve("scheduled.bin")
         val items = listOf(
-            ScheduledMessage(7, "pic", Payload(ContentType.IMAGE_WEBP, byteArrayOf(1, 2, 3), "a.webp"), "EK2B", ModemProfile.FAST, 1234, Repeat.DAILY),
+            ScheduledMessage(7, "pic", Payload(ContentType.IMAGE_WEBP, byteArrayOf(1, 2, 3), "a.webp"), "EK2B", ModemProfile.FAST, 1234, Repeat.DAILY, encrypt = true),
             ScheduledMessage(8, "My position", null, "", null, 5678),
         )
         FileScheduleStore(file).save(items)

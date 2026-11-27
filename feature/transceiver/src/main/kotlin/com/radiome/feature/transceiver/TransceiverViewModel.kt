@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 @HiltViewModel
@@ -372,35 +373,46 @@ class TransceiverViewModel @Inject constructor(
         while (true) {
             val next = _queue.first { it.isNotEmpty() }.first()
             client.running.first { it }
-            // One at a time: wait until none of our transfers is still on air or waiting for its answer.
-            client.transfers.first { m -> m.values.none { it.direction == Direction.OUTGOING && !Presenters.isFinished(it) } }
-            if (_queue.value.firstOrNull()?.id != next.id) continue // removed while we waited
-            val options = if (next.autoProfile) next.options.copy(profile = rate.current) else next.options
-            // The group key may have been removed since this was queued: drop it with a notice rather than send it in clear.
-            if (options.encrypt && keys.key.value == null) {
-                _queue.update { q -> q.filterNot { it.id == next.id } }
-                _messages.trySend(tr("Removed \"%s\" from the queue: it was to go encrypted, but no group key is set now.", next.label))
-                continue
-            }
-            val sid = try {
-                dispatch(next.payload, options)
-            } catch (e: IllegalStateException) {
-                _queue.update { q -> q.filterNot { it.id == next.id } }
-                _messages.trySend(tr("Could not send \"%s\": %s", next.label, e.message ?: ""))
-                continue
-            } ?: continue // the radio went off; try again when it is back
+            // Shared with scheduled messages, so the two never both find the link idle and send at once.
+            val sid = scheduler.sendLock.withLock { sendNext(next) } ?: continue
+            awaitEnd(sid)
+        }
+    }
+
+    /** Sends the queue's [next] item once the link is idle; null when it was not sent and the loop should go round. */
+    private suspend fun sendNext(next: QueuedItem): Int? {
+        // One at a time: wait until none of our transfers is still on air or waiting for its answer.
+        client.transfers.first { m -> m.values.none { it.direction == Direction.OUTGOING && !Presenters.isFinished(it) } }
+        if (_queue.value.firstOrNull()?.id != next.id) return null // removed while we waited
+        val options = if (next.autoProfile) next.options.copy(profile = rate.current) else next.options
+        // The group key may have been removed since this was queued: drop it with a notice rather than send it in clear.
+        if (options.encrypt && keys.key.value == null) {
             _queue.update { q -> q.filterNot { it.id == next.id } }
-            withTimeoutOrNull(QUEUE_ITEM_TIMEOUT_MS) {
-                // Done when it is delivered or failed, or when its link goes away (radio stopped or restarted), so the
-                // rest of the queue does not wait for the timeout.
-                var seen = false
-                combine(client.transfers, ended, client.running) { m, done, running ->
-                    val t = m[sid]
-                    val gone = seen && t == null
-                    if (t != null) seen = true
-                    sid in done || t?.let(Presenters::isFinished) == true || gone || !running
-                }.first { it }
-            }
+            _messages.trySend(tr("Removed \"%s\" from the queue: it was to go encrypted, but no group key is set now.", next.label))
+            return null
+        }
+        val sid = try {
+            dispatch(next.payload, options)
+        } catch (e: IllegalStateException) {
+            _queue.update { q -> q.filterNot { it.id == next.id } }
+            _messages.trySend(tr("Could not send \"%s\": %s", next.label, e.message ?: ""))
+            return null
+        } ?: return null // the radio went off; try again when it is back
+        _queue.update { q -> q.filterNot { it.id == next.id } }
+        return sid
+    }
+
+    private suspend fun awaitEnd(sid: Int) {
+        withTimeoutOrNull(QUEUE_ITEM_TIMEOUT_MS) {
+            // Done when it is delivered or failed, or when its link goes away (radio stopped or restarted), so the
+            // rest of the queue does not wait for the timeout.
+            var seen = false
+            combine(client.transfers, ended, client.running) { m, done, running ->
+                val t = m[sid]
+                val gone = seen && t == null
+                if (t != null) seen = true
+                sid in done || t?.let(Presenters::isFinished) == true || gone || !running
+            }.first { it }
         }
     }
 
