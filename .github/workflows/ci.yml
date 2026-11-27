@@ -25,6 +25,9 @@ jobs:
           name: radiome-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: ignore
+      - name: Show screenshot capture errors
+        if: always()
+        run: head -n 40 feature/transceiver/build/outputs/screenshots/*.error.txt 2>/dev/null || echo "No capture errors"
       - name: Upload Settings screenshots
         if: always()
         uses: actions/upload-artifact@v4
