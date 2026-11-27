@@ -385,7 +385,7 @@ fun TransceiverApp(
                         restartPending = restartPending,
                         pttDevice = pttDevice,
                     ),
-                    actions = SettingsActions(onRestartLink = viewModel::restartLink, onTestTone = { viewModel.testTone() }),
+                    actions = SettingsActions(onRestartLink = viewModel::restartLink, onTestTone = { viewModel.testTone() }, onAutoSpeed = viewModel::onAutoSpeed),
                 )
             }
         }

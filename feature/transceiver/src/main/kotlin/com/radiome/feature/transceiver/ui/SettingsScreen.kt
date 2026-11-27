@@ -100,6 +100,8 @@ import kotlin.math.roundToInt
 data class SettingsActions(
     val onRestartLink: () -> Unit = {},
     val onTestTone: () -> Unit = {},
+    /** Turns automatic speed on or off, live and stored. Null only changes the stored setting (tests). */
+    val onAutoSpeed: ((Boolean) -> Unit)? = null,
 )
 
 /**
@@ -150,7 +152,7 @@ fun SettingsScreen(
         PermissionsCard(permissions, onBeforeRevokeMicrophone, Modifier.anchor(SettingsSection.PERMISSIONS))
         LocationCard(settings, onChange, groupKeyFingerprint, permissions.rows, ::jumpTo, Modifier.anchor(SettingsSection.LOCATION))
         SecurityCard(settings, onChange, groupKeyFingerprint, keyBusy, onSetPassphrase, onClearKey, Modifier.anchor(SettingsSection.SECURITY))
-        MessagesCard(settings, onChange, Modifier.anchor(SettingsSection.MESSAGES))
+        MessagesCard(settings, onChange, actions.onAutoSpeed, Modifier.anchor(SettingsSection.MESSAGES))
         DisplayCard(settings, onChange, Modifier.anchor(SettingsSection.DISPLAY))
         AdvancedCard(settings, onChange, advancedOpen, { advancedOpen = it }, Modifier.anchor(SettingsSection.ADVANCED))
         AboutCard(onChange, Modifier.anchor(SettingsSection.ABOUT))
@@ -572,7 +574,12 @@ private fun SecurityCard(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MessagesCard(settings: RadioSettings, onChange: ((RadioSettings) -> RadioSettings) -> Unit, modifier: Modifier) {
+private fun MessagesCard(
+    settings: RadioSettings,
+    onChange: ((RadioSettings) -> RadioSettings) -> Unit,
+    onAutoSpeed: ((Boolean) -> Unit)?,
+    modifier: Modifier,
+) {
     SettingsCard(
         icon = Icons.Filled.Email,
         title = tr("Messages and images"),
@@ -586,7 +593,7 @@ private fun MessagesCard(settings: RadioSettings, onChange: ((RadioSettings) -> 
         SwitchRow(
             tr("Pick the speed automatically"), settings.adaptiveSpeed,
             tr("Chooses Fast, Standard or Robust from how the last transfers went."),
-        ) { v -> onChange { it.copy(adaptiveSpeed = v) } }
+        ) { v -> onAutoSpeed?.invoke(v) ?: onChange { it.copy(adaptiveSpeed = v) } }
         RowDivider()
 
         GroupLabel(tr("Quick messages"))
