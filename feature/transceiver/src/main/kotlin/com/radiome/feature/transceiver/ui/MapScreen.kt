@@ -11,6 +11,19 @@ import android.location.Location
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,9 +48,6 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -114,6 +124,7 @@ fun MapScreen(
     hasKey: Boolean,
     fingerprint: String?,
     now: Long,
+    send: SendPositionUi = SendPositionUi(),
     onSendPosition: () -> Unit,
     onMessage: (callsign: String) -> Unit,
     onClear: () -> Unit,
@@ -156,7 +167,7 @@ fun MapScreen(
         locationServicesOn = MapLocation.servicesOn(context)
         if (granted.values.any { it }) followRequested = true
     }
-    val askLocation = {
+    val askLocation: () -> Unit = {
         PermissionPrompts.markAsked(context, MapLocation.PERMISSIONS.toList())
         locationLauncher.launch(MapLocation.PERMISSIONS)
     }
@@ -192,141 +203,134 @@ fun MapScreen(
         }
     }
 
-    Column(modifier.fillMaxSize()) {
-        KeyBanner(hasKey, fingerprint)
-        LocationBanner(
-            allowed = locationAllowed,
-            precise = preciseLocation,
-            servicesOn = locationServicesOn,
-            onAllow = askLocation,
-            onTurnOn = { MapLocation.openLocationSettings(context) },
-        )
-
-        Box(Modifier.fillMaxWidth().weight(1f)) {
-            AndroidView(
-                factory = { ctx ->
-                    MapView(ctx).apply {
-                        // Compose can detach and re-attach the view (tab changes, layout passes); by default osmdroid
-                        // tears the map down on detach, leaving overlays unusable. We detach it ourselves in onRelease.
-                        setDestroyMode(false)
-                        setTileSource(TileSourceFactory.MAPNIK)
-                        setUseDataConnection(onlineTiles)
-                        setMultiTouchControls(true)
-                        isTilesScaledToDpi = true
-                        MapCamera.restore(this)
-                        overlays.add(MapEventsOverlay(object : MapEventsReceiver {
-                            override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
-                                onSelect(null)
-                                return false
-                            }
-
-                            override fun longPressHelper(p: GeoPoint?): Boolean = false
-                        }))
-                        overlays.add(ScaleBarOverlay(this).apply {
-                            setCentred(true)
-                            setAlignBottom(true)
-                            setScaleBarOffset(resources.displayMetrics.widthPixels / 2, (12 * resources.displayMetrics.density).toInt())
-                        })
-                        overlays.add(CopyrightOverlay(ctx))
-                        map = this
-                    }
+    val openLocationSettings: () -> Unit = { MapLocation.openLocationSettings(context) }
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        // A square map: full width on a phone held upright, never taller than about half the screen, so the info
+        // above and the positions below always have room. The map draws only inside its square.
+        val mapSide = minOf(maxWidth, maxHeight * 0.55f)
+        Column(Modifier.fillMaxSize()) {
+            MapInfoPanel(
+                hasKey = hasKey,
+                fingerprint = fingerprint,
+                radioOn = send.radioOn,
+                gps = when {
+                    !locationAllowed -> tr("Location not allowed")
+                    !locationServicesOn -> tr("Location off")
+                    liveFix == null -> tr("Finding you…")
+                    !preciseLocation -> tr("Approximate location")
+                    else -> tr("GPS live")
                 },
-                onRelease = { view ->
-                    // The only place the map is torn down: Compose is done with this view for good.
-                    MapCamera.save(view)
-                    if (map === view) map = null
-                    view.onDetach()
+                onlineTiles = onlineTiles,
+                stations = positions.count { !it.own },
+                locationProblem = when {
+                    !locationAllowed -> Triple(tr("Allow location to see yourself on the map."), tr("Allow"), askLocation)
+                    !locationServicesOn -> Triple(tr("Location is off on this phone, so the map can't find you."), tr("Turn on"), openLocationSettings)
+                    !preciseLocation -> Triple(tr("Approximate location only: you can show up to 3 km off."), tr("Use precise"), askLocation)
+                    else -> null
                 },
-                update = { view ->
-                    // With a live fix the GPS dot is "you"; the last position you sent would be a second, older you.
-                    val shown = if (liveFix != null) positions.filterNot { it.own } else positions
-                    layers.render(view, shown, if (showTrails) trails else emptyMap(), now, selected, onSelect)
-                },
-                modifier = Modifier.fillMaxSize(),
+                saving = saving,
+                onCancelSave = { saveJob?.cancel() },
             )
 
-            Column(
-                Modifier.align(Alignment.TopEnd).padding(8.dp),
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+            Box(
+                Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .size(mapSide)
+                    .clipToBounds()
+                    .testTag("map"),
             ) {
-                MapControl(tr("My location"), active = myLocation?.isFollowLocationEnabled == true) { centerOnMe() }
-                MapControl(tr("Show all"), enabled = positions.isNotEmpty()) {
+                AndroidView(
+                    factory = { ctx ->
+                        MapView(ctx).apply {
+                            // Compose can detach and re-attach the view (tab changes, layout passes); by default osmdroid
+                            // tears the map down on detach, leaving overlays unusable. We detach it ourselves in onRelease.
+                            setDestroyMode(false)
+                            setTileSource(TileSourceFactory.MAPNIK)
+                            setUseDataConnection(onlineTiles)
+                            setMultiTouchControls(true)
+                            isTilesScaledToDpi = true
+                            MapCamera.restore(this)
+                            overlays.add(MapEventsOverlay(object : MapEventsReceiver {
+                                override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
+                                    onSelect(null)
+                                    return false
+                                }
+
+                                override fun longPressHelper(p: GeoPoint?): Boolean = false
+                            }))
+                            val margin = (8 * resources.displayMetrics.density).toInt()
+                            overlays.add(ScaleBarOverlay(this).apply { setScaleBarOffset(margin, margin) })
+                            overlays.add(CopyrightOverlay(ctx))
+                            map = this
+                        }
+                    },
+                    onRelease = { view ->
+                        // The only place the map is torn down: Compose is done with this view for good.
+                        MapCamera.save(view)
+                        if (map === view) map = null
+                        view.onDetach()
+                    },
+                    update = { view ->
+                        // With a live fix the GPS dot is "you"; the last position you sent would be a second, older you.
+                        val shown = if (liveFix != null) positions.filterNot { it.own } else positions
+                        layers.render(view, shown, if (showTrails) trails else emptyMap(), now, selected, onSelect)
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                SendPositionButton(
+                    hasKey = hasKey,
+                    send = send,
+                    lastSent = positions.firstOrNull { it.own }?.let { MapGeo.ageMs(it, now) },
+                    onClick = onSendPosition,
+                    modifier = Modifier.weight(1f),
+                )
+                MapIconButton(MapIcons.myLocation, tr("My location"), active = myLocation?.isFollowLocationEnabled == true) { centerOnMe() }
+                MapIconButton(MapIcons.showAll, tr("Show all"), enabled = positions.isNotEmpty()) {
                     myLocation?.disableFollowLocation()
                     map?.let { fit(it, positions) }
                 }
-                MapControl(tr("Trails"), active = showTrails) {
+                MapIconButton(MapIcons.trails, tr("Trails"), active = showTrails) {
                     showTrails = !showTrails
                     OfflineMaps.setShowTrails(context, showTrails)
                 }
-                MapControl(tr("Offline maps"), active = !onlineTiles) { showOfflineDialog = true }
+                MapIconButton(MapIcons.layers, tr("Offline maps"), active = !onlineTiles) { showOfflineDialog = true }
             }
+            HorizontalDivider()
 
-            saving?.let { p ->
-                Surface(
-                    Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 36.dp),
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    tonalElevation = 2.dp,
-                ) {
-                    Row(Modifier.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(tr("Saving map %d/%d", p.done, p.total), style = MaterialTheme.typography.labelMedium)
-                        TextButton(onClick = { saveJob?.cancel() }) { Text(tr("Cancel")) }
-                    }
-                }
-            }
-
-            if (!onlineTiles) {
-                Surface(
-                    Modifier.align(Alignment.TopStart).padding(8.dp),
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    tonalElevation = 2.dp,
-                ) {
-                    Text(
-                        tr("Offline: saved maps only"),
-                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelMedium,
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                if (selectedStation != null) {
+                    StationDetails(
+                        p = selectedStation,
+                        me = me,
+                        now = now,
+                        onCenter = {
+                            myLocation?.disableFollowLocation()
+                            map?.controller?.animateTo(GeoPoint(selectedStation.position.latitude, selectedStation.position.longitude), 16.0, 600L)
+                        },
+                        onMessage = { onMessage(selectedStation.callsign) },
+                        onClose = { selected = null },
+                    )
+                } else {
+                    StationList(
+                        positions = MapGeo.sortForList(positions, me),
+                        me = me,
+                        now = now,
+                        onPick = { p ->
+                            selected = MapGeo.key(p)
+                            myLocation?.disableFollowLocation()
+                            map?.controller?.animateTo(GeoPoint(p.position.latitude, p.position.longitude), 15.0, 600L)
+                        },
+                        onClear = { confirmClear = true },
                     )
                 }
             }
-
-            Button(
-                onClick = onSendPosition,
-                enabled = hasKey,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(start = 12.dp, end = 12.dp, bottom = 36.dp),
-                elevation = ButtonDefaults.elevatedButtonElevation(),
-            ) {
-                Icon(Icons.Filled.LocationOn, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text(tr("Send my position"))
-            }
-        }
-
-        if (selectedStation != null) {
-            StationDetails(
-                p = selectedStation,
-                me = me,
-                now = now,
-                onCenter = {
-                    myLocation?.disableFollowLocation()
-                    map?.controller?.animateTo(GeoPoint(selectedStation.position.latitude, selectedStation.position.longitude), 16.0, 600L)
-                },
-                onMessage = { onMessage(selectedStation.callsign) },
-                onClose = { selected = null },
-            )
-        } else {
-            StationList(
-                positions = MapGeo.sortForList(positions, me),
-                me = me,
-                now = now,
-                onPick = { p ->
-                    selected = MapGeo.key(p)
-                    myLocation?.disableFollowLocation()
-                    map?.controller?.animateTo(GeoPoint(p.position.latitude, p.position.longitude), 15.0, 600L)
-                },
-                onClear = { confirmClear = true },
-            )
         }
     }
 
@@ -442,63 +446,159 @@ fun MapScreen(
     }
 }
 
+/** What "Send my position" needs to know to say what a tap will do. */
+data class SendPositionUi(
+    val radioOn: Boolean = true,
+    /** Waiting for the radio to start or for a GPS fix, or going out. */
+    val sending: Boolean = false,
+    /** Automatic sending interval from Settings; 0 is off. */
+    val autoEveryMin: Int = 0,
+)
+
+/**
+ * The top of the map screen: one line of status (encryption key, GPS, radio, maps, stations), the one problem that
+ * needs a tap, map save progress, and a help section behind the info button.
+ */
 @Composable
-private fun KeyBanner(hasKey: Boolean, fingerprint: String?) {
-    var expanded by rememberSaveable { mutableStateOf(!hasKey) }
-    Card(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clickable { expanded = !expanded },
-        colors = CardDefaults.cardColors(
-            containerColor = if (hasKey) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
-        ),
+private fun MapInfoPanel(
+    hasKey: Boolean,
+    fingerprint: String?,
+    radioOn: Boolean,
+    gps: String,
+    onlineTiles: Boolean,
+    stations: Int,
+    locationProblem: Triple<String, String, () -> Unit>?,
+    saving: AreaDownloader.Progress?,
+    onCancelSave: () -> Unit,
+) {
+    var help by rememberSaveable { mutableStateOf(!hasKey) }
+    Surface(
+        Modifier.fillMaxWidth(),
+        color = if (hasKey) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.errorContainer,
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (hasKey) tr("Positions are end-to-end encrypted · key %s", fingerprint) else tr("No group key: positions can't be sent or read"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
+                Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (hasKey) tr("Encrypted · key %s", fingerprint) else tr("No group key: positions can't be sent or read"),
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        listOf(
+                            gps,
+                            if (radioOn) tr("Radio on") else tr("Radio off"),
+                            if (onlineTiles) tr("Maps online") else tr("Saved maps only"),
+                            tr("Stations: %d", stations),
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                    )
+                }
+                IconButton(onClick = { help = !help }) {
+                    Icon(Icons.Filled.Info, contentDescription = if (help) tr("Hide help") else tr("Map help"))
+                }
             }
-            if (expanded) {
-                Text(
-                    tr("Encrypted traffic is not allowed on amateur radio bands. Use licence-free (PMR446, FRS) or licensed private channels."),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            locationProblem?.let { (text, button, action) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(onClick = action) { Text(button) }
+                }
+            }
+            saving?.let { p ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(tr("Saving map %d/%d", p.done, p.total), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onCancelSave) { Text(tr("Cancel")) }
+                }
+            }
+            if (help) {
+                Column(Modifier.padding(end = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    listOf(
+                        tr("Blue is you. Green: a fix from the last 15 minutes, amber: older, grey: older than an hour."),
+                        tr("Tap a station for its distance and bearing from you, and Message to chat with it."),
+                        tr("Buttons under the map: follow me, show every station, trails of the last 6 hours, offline maps."),
+                        tr("Encrypted traffic is not allowed on amateur radio bands. Use licence-free (PMR446, FRS) or licensed private channels."),
+                    ).forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
             }
         }
     }
 }
 
-/** Why you are missing from the map, with the one tap that fixes it. Nothing shows when location works. */
+/** The main action, saying what a tap does now: set a key first, turn the radio on and send, or just send. */
 @Composable
-private fun LocationBanner(allowed: Boolean, precise: Boolean, servicesOn: Boolean, onAllow: () -> Unit, onTurnOn: () -> Unit) {
-    val (text, button, action) = when {
-        !allowed -> Triple(tr("Allow location to see yourself on the map."), tr("Allow"), onAllow)
-        !servicesOn -> Triple(tr("Location is off on this phone, so the map can't find you."), tr("Turn on"), onTurnOn)
-        !precise -> Triple(tr("Approximate location only: you can show up to 3 km off."), tr("Use precise"), onAllow)
-        else -> return
+private fun SendPositionButton(hasKey: Boolean, send: SendPositionUi, lastSent: Long?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val (title, detail) = when {
+        !hasKey -> tr("Set group key") to tr("Positions are only sent encrypted")
+        send.sending -> tr("Sending position…") to tr("Waiting for the radio and a GPS fix")
+        !send.radioOn -> tr("Turn radio on and send") to tr("The radio is off")
+        else -> tr("Send my position") to listOfNotNull(
+            lastSent?.let { tr("Sent %s", Presenters.formatAge(it)) } ?: tr("Not sent yet"),
+            send.autoEveryMin.takeIf { it > 0 }?.let { tr("auto every %d min", it) },
+        ).joinToString(" · ")
     }
-    Card(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+    Button(
+        onClick = onClick,
+        enabled = !send.sending,
+        modifier = modifier.heightIn(min = 48.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
     ) {
-        Row(Modifier.padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-            TextButton(onClick = action) { Text(button) }
+        if (send.sending) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(if (hasKey) Icons.Filled.LocationOn else Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f, fill = false)) {
+            Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(detail, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
 @Composable
-private fun MapControl(label: String, active: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
-    val padding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+private fun MapIconButton(icon: ImageVector, label: String, active: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    val m = Modifier.size(44.dp)
     if (active) {
-        Button(onClick = onClick, enabled = enabled, contentPadding = padding) { Text(label, style = MaterialTheme.typography.labelMedium) }
+        FilledIconButton(onClick = onClick, enabled = enabled, modifier = m) { Icon(icon, contentDescription = label) }
     } else {
-        FilledTonalButton(onClick = onClick, enabled = enabled, contentPadding = padding) { Text(label, style = MaterialTheme.typography.labelMedium) }
+        FilledTonalIconButton(onClick = onClick, enabled = enabled, modifier = m) { Icon(icon, contentDescription = label) }
     }
+}
+
+/** Material symbols the core icon set lacks, drawn from their 24 dp path data. */
+private object MapIcons {
+    private fun icon(name: String, path: String) = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
+        .addPath(addPathNodes(path), fill = SolidColor(Color.Black))
+        .build()
+
+    val myLocation = icon(
+        "MyLocation",
+        "M12,8c-2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4 -1.79,-4 -4,-4zM20.94,11c-0.46,-4.17 -3.77,-7.48 -7.94,-7.94L13,1h-2v2.06" +
+            "C6.83,3.52 3.52,6.83 3.06,11L1,11v2h2.06c0.46,4.17 3.77,7.48 7.94,7.94L11,23h2v-2.06c4.17,-0.46 7.48,-3.77 7.94,-7.94L23,13v-2" +
+            "h-2.06zM12,19c-3.87,0 -7,-3.13 -7,-7s3.13,-7 7,-7 7,3.13 7,7 -3.13,7 -7,7z",
+    )
+    val showAll = icon(
+        "ShowAll",
+        "M15,3l2.3,2.3 -2.89,2.87 1.42,1.42L18.7,6.7 21,9L21,3zM3,9l2.3,-2.3 2.87,2.89 1.42,-1.42L6.7,5.3 9,3L3,3zM9,21l-2.3,-2.3 " +
+            "2.89,-2.87 -1.42,-1.42L5.3,17.3 3,15v6zM21,15l-2.3,2.3 -2.87,-2.89 -1.42,1.42 2.89,2.87L15,21h6z",
+    )
+    val trails = icon(
+        "Trails",
+        "M23,8c0,1.1 -0.9,2 -2,2 -0.18,0 -0.35,-0.02 -0.51,-0.07l-3.56,3.55c0.05,0.16 0.07,0.34 0.07,0.52 0,1.1 -0.9,2 -2,2s-2,-0.9 " +
+            "-2,-2c0,-0.18 0.02,-0.36 0.07,-0.52l-2.55,-2.55c-0.16,0.05 -0.34,0.07 -0.52,0.07s-0.36,-0.02 -0.52,-0.07l-4.55,4.56" +
+            "c0.05,0.16 0.07,0.33 0.07,0.51 0,1.1 -0.9,2 -2,2s-2,-0.9 -2,-2 0.9,-2 2,-2c0.18,0 0.35,0.02 0.51,0.07l4.56,-4.55" +
+            "C8.02,9.36 8,9.18 8,9c0,-1.1 0.9,-2 2,-2s2,0.9 2,2c0,0.18 -0.02,0.36 -0.07,0.52l2.55,2.55c0.16,-0.05 0.34,-0.07 0.52,-0.07" +
+            "s0.36,0.02 0.52,0.07l3.55,-3.56C19.02,8.35 19,8.18 19,8c0,-1.1 0.9,-2 2,-2s2,0.9 2,2z",
+    )
+    val layers = icon(
+        "Layers",
+        "M11.99,18.54l-7.37,-5.73L3,14.07l9,7 9,-7 -1.63,-1.27 -7.38,5.74zM12,16l7.36,-5.73L21,9l-9,-7 -9,7 1.63,1.27L12,16z",
+    )
 }
 
 @Composable
@@ -524,7 +624,7 @@ private fun StationList(
     onClear: () -> Unit,
 ) {
     LazyColumn(
-        Modifier.fillMaxWidth().heightIn(max = 200.dp),
+        Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 4.dp),
     ) {
         if (positions.isEmpty()) {
@@ -577,7 +677,10 @@ private fun StationDetails(
     onMessage: () -> Unit,
     onClose: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FreshnessDot(p, now)
             Spacer(Modifier.width(10.dp))

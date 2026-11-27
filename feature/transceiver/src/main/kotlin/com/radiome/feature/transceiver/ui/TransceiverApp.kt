@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.radiome.core.protocol.payload.Files
 import com.radiome.feature.transceiver.TransceiverViewModel
 import com.radiome.feature.transceiver.share.HistoryExport
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class Tab(val label: String, val icon: ImageVector) {
@@ -80,6 +81,7 @@ fun TransceiverApp(
     val chatThreads by viewModel.chatThreads.collectAsStateWithLifecycle()
     val scheduled by viewModel.scheduled.collectAsStateWithLifecycle()
     val resent by viewModel.resent.collectAsStateWithLifecycle()
+    val positionSending by viewModel.positionSending.collectAsStateWithLifecycle()
     val queueActions = remember(viewModel) {
         QueueActions(viewModel::onAutoSpeed, viewModel::queueText, viewModel::queueImage, viewModel::removeQueued, viewModel::scheduleDraft)
     }
@@ -140,6 +142,19 @@ fun TransceiverApp(
     }
     val scheduleLocationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         if (granted.values.none { it }) viewModel.notify(tr("Allow location access to send your position."))
+    }
+    // "Send my position" with the radio off turns it on and sends once it is running. The wish expires after 30 s,
+    // so a refused microphone prompt can't make a later, unrelated radio start send your position.
+    var sendWhenRunning by remember { mutableStateOf(false) }
+    LaunchedEffect(sendWhenRunning, radio.running) {
+        if (!sendWhenRunning) return@LaunchedEffect
+        if (radio.running) {
+            sendWhenRunning = false
+            sendPosition()
+        } else {
+            delay(30_000)
+            sendWhenRunning = false
+        }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let { viewModel.onImagePicked(it.toString()) }
@@ -323,7 +338,21 @@ fun TransceiverApp(
                     hasKey = groupKey != null,
                     fingerprint = groupKey?.fingerprint,
                     now = now,
-                    onSendPosition = { sendPosition() },
+                    send = SendPositionUi(
+                        radioOn = radio.running,
+                        sending = positionSending || sendWhenRunning,
+                        autoEveryMin = settings.beaconIntervalMin,
+                    ),
+                    onSendPosition = {
+                        when {
+                            groupKey == null -> tab = Tab.SETTINGS
+                            !radio.running -> {
+                                sendWhenRunning = true
+                                startListening()
+                            }
+                            else -> sendPosition()
+                        }
+                    },
                     onMessage = { callsign ->
                         chatToOpen = callsign
                         tab = Tab.CHAT

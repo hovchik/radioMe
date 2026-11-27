@@ -513,8 +513,22 @@ class TransceiverViewModel @Inject constructor(
         sendPositionNow()
     }
 
-    fun sendPositionNow() = viewModelScope.launch {
-        _messages.trySend(Presenters.beaconMessage(beacon.sendNow()))
+    private val _positionSending = MutableStateFlow(false)
+    /** A manual "Send my position" is waiting for a GPS fix or going out; a second tap is ignored meanwhile. */
+    val positionSending: StateFlow<Boolean> = _positionSending.asStateFlow()
+
+    fun sendPositionNow() {
+        if (_positionSending.value) return
+        _positionSending.value = true
+        viewModelScope.launch {
+            // Cleared before the result is shown, so a tap right after the message is never ignored.
+            val result = try {
+                beacon.sendNow()
+            } finally {
+                _positionSending.value = false
+            }
+            _messages.trySend(Presenters.beaconMessage(result))
+        }
     }
 
     fun clearPositions() = viewModelScope.launch { positionHistory.clear() }
