@@ -19,7 +19,8 @@ import org.robolectric.annotation.Config
 
 /** Renders the map with stations on it, the state right after sending or receiving a position. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+// A typical phone held upright (Robolectric defaults to a 320x470 dp screen, too short for the list under the map).
+@Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
 class MapScreenTest {
     @get:Rule
     val compose = createComposeRule()
