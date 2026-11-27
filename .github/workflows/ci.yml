@@ -25,6 +25,13 @@ jobs:
           name: radiome-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: ignore
+      - name: Upload Settings screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: settings-screenshots
+          path: feature/transceiver/build/outputs/screenshots/*.png
+          if-no-files-found: ignore
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
