@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  USB serial chips used by PTT cables. Matching them here lets the user tick "Always open RadioMe" once, after which
+  Android grants USB access by itself on every plug-in instead of asking each time.
+-->
+<resources>
+    <!-- Silicon Labs CP210x (Digirig) -->
+    <usb-device vendor-id="4292" />
+    <!-- FTDI -->
+    <usb-device vendor-id="1027" />
+    <!-- WCH CH34x -->
+    <usb-device vendor-id="6790" />
+</resources>

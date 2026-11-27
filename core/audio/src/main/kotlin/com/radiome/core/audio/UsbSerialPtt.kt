@@ -20,6 +20,8 @@ class UsbSerialPtt(context: Context, private val useRts: Boolean) : PttKeyer {
     private var connection: UsbDeviceConnection? = null
     private var chip: SerialChip? = null
     private var iface = 0
+    private var claimed: android.hardware.usb.UsbInterface? = null
+    private var deviceId: Int? = null
 
     /** Name of the adapter in use, or null. */
     var deviceName: String? = null
@@ -44,10 +46,11 @@ class UsbSerialPtt(context: Context, private val useRts: Boolean) : PttKeyer {
         }
         val c = usb.openDevice(device) ?: return false
         iface = interfaceFor(device, found)
-        device.getInterface(iface.coerceAtMost(device.interfaceCount - 1)).let { c.claimInterface(it, true) }
+        claimed = device.getInterface(iface.coerceAtMost(device.interfaceCount - 1)).also { c.claimInterface(it, true) }
         for (t in SerialLines.open(found, iface)) transfer(c, t)
         connection = c
         chip = found
+        deviceId = device.deviceId
         deviceName = device.productName ?: "USB serial %04x:%04x".format(device.vendorId, device.productId)
         key(false)
         return true
@@ -62,12 +65,19 @@ class UsbSerialPtt(context: Context, private val useRts: Boolean) : PttKeyer {
         }
     }
 
+    /** True when [device] is the adapter this keyer has open (so its detach must close the keyer). */
+    @Synchronized
+    fun isUsing(device: UsbDevice?): Boolean = device != null && device.deviceId == deviceId
+
     @Synchronized
     override fun close() {
         runCatching { key(false) }
+        connection?.let { c -> claimed?.let { runCatching { c.releaseInterface(it) } } }
         connection?.close()
         connection = null
         chip = null
+        claimed = null
+        deviceId = null
         deviceName = null
     }
 

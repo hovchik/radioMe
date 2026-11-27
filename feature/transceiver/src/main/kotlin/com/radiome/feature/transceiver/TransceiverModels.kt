@@ -23,6 +23,7 @@ import com.radiome.core.protocol.payload.Payload
 import com.radiome.core.protocol.session.AirtimeEstimator
 import com.radiome.core.protocol.session.ChunkState
 import com.radiome.core.protocol.session.TransferOptions
+import com.radiome.core.audio.RouteMode
 import com.radiome.core.audio.VolumeAdvice
 import com.radiome.core.audio.volumeAdvice
 import com.radiome.feature.transceiver.link.OutputStatus
@@ -54,12 +55,19 @@ data class RadioUi(
     val hint: String? get() = when {
         !running -> null
         outputMuted -> tr("Media volume is muted, so nothing is transmitted. Turn the volume up to about 70%.")
+        route?.pttMissing == true -> tr("No USB PTT adapter found, so the radio will not be keyed. Plug in the cable and allow USB access.")
+        route?.cableMissing == true -> tr("Cable is selected but none is plugged in. Sound uses the phone's speaker and mic.")
         linkState == LinkState.TRANSMITTING -> null
+        inputLevel == InputLevel.HOT && cable -> tr("Input is clipping. Turn the radio's volume down.")
         inputLevel == InputLevel.HOT -> tr("Input is clipping. Turn the radio volume down or move the phone away.")
-        volumeAdvice == VolumeAdvice.TOO_LOW -> tr("Media volume is low. Set it to about 70% so the radio's VOX opens reliably.")
+        volumeAdvice == VolumeAdvice.TOO_LOW && !cable -> tr("Media volume is low. Set it to about 70% so the radio's VOX opens reliably.")
+        // Over a cable the radio's mic input is sensitive: a hot phone output overdrives it and splatters.
+        volumeAdvice == VolumeAdvice.CLIPPING_RISK && cable -> tr("Media volume is near maximum. Over a cable this can overdrive the radio; lower the volume or the output gain.")
         volumeAdvice == VolumeAdvice.CLIPPING_RISK -> tr("Media volume is near maximum and may distort. About 70% works best.")
         else -> null
     }
+
+    private val cable: Boolean get() = route?.mode == RouteMode.CABLE && !route.cableMissing
 }
 
 data class TransferCard(

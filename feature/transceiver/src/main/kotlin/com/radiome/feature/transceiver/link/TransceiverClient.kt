@@ -13,8 +13,17 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/** Where audio goes right now, for the status bar. */
-data class RouteInfo(val mode: RouteMode, val input: String, val output: String)
+/**
+ * Where audio goes right now, for the status bar. [cableMissing]: cable was chosen but none is plugged in.
+ * [pttMissing]: PTT is set to USB serial but no adapter is open, so the radio will not be keyed.
+ */
+data class RouteInfo(
+    val mode: RouteMode,
+    val input: String,
+    val output: String,
+    val cableMissing: Boolean = false,
+    val pttMissing: Boolean = false,
+)
 
 /** What the UI needs from the radio. Implemented over [com.radiome.core.audio.TransceiverService]; faked in tests. */
 interface TransceiverClient {

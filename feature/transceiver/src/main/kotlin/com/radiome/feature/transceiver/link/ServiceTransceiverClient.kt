@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -83,8 +84,8 @@ class ServiceTransceiverClient(
         .flatMapLatest { it?.pttDevice ?: flowOf(null) }
         .stateIn(scope, SharingStarted.Eagerly, null)
     override val route: StateFlow<RouteInfo?> = service
-        .flatMapLatest { it?.route ?: flowOf(null) }
-        .map { r -> r?.let { RouteInfo(it.mode, it.inputName, it.outputName) } }
+        .flatMapLatest { s -> s?.route?.combine(s.pttMissing, ::Pair) ?: flowOf(null) }
+        .map { p -> p?.first?.let { RouteInfo(it.mode, it.inputName, it.outputName, it.cableMissing, p.second) } }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     override fun startListening() = TransceiverService.start(appContext)
