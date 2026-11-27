@@ -12,6 +12,9 @@ import com.radiome.core.protocol.payload.CompressionMode
 import com.radiome.core.protocol.payload.ContentType
 import com.radiome.feature.transceiver.settings.SettingsRepository
 import com.radiome.feature.transceiver.link.PositionBeacon
+import com.radiome.feature.transceiver.link.InMemoryScheduleStore
+import com.radiome.feature.transceiver.link.Repeat
+import com.radiome.feature.transceiver.link.ScheduledSender
 import com.radiome.core.protocol.payload.Position
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -49,6 +52,8 @@ class TransceiverViewModelTest {
     private val location = FakeLocation()
     private lateinit var beacon: PositionBeacon
     private val voice = FakeVoice()
+    private val history = FakeHistory()
+    private lateinit var scheduler: ScheduledSender
 
     @Before
     fun setUp() {
@@ -57,7 +62,8 @@ class TransceiverViewModelTest {
         val file = tmp.newFolder().resolve("s.preferences_pb")
         settings = SettingsRepository(PreferenceDataStoreFactory.create(scope = scope, produceFile = { file }), scope)
         beacon = PositionBeacon(client, settings, keys, location, scope)
-        vm = TransceiverViewModel(client, FakeHistory(), settings, codec, FakePositions(), keys, beacon, voice)
+        scheduler = ScheduledSender(client, settings, keys, beacon, InMemoryScheduleStore(), scope)
+        vm = TransceiverViewModel(client, history, settings, codec, FakePositions(), keys, beacon, voice, scheduler)
             .apply { workDispatcher = Dispatchers.Unconfined }
     }
 
@@ -442,5 +448,55 @@ class TransceiverViewModelTest {
         assertTrue(withTimeout(2_000) { vm.messages.first() }.startsWith("Too short"))
         assertNull(vm.compose.value.voice)
         assertFalse(vm.compose.value.recording.active)
+    }
+
+    private fun failed(id: Long, text: String, at: Long, peer: String? = null) = com.radiome.data.TransferRecord(
+        id, 0x100 + id.toInt(), com.radiome.core.protocol.link.Direction.OUTGOING, com.radiome.data.TransferStatus.FAILED,
+        ContentType.TEXT, "", text, text.toByteArray(), 1, 0, 0, 0.0, 0, "STANDARD", at, at, peer = peer,
+    )
+
+    @Test
+    fun resendAllFailedQueuesThemOldestFirstAndOnlyOnce() = runBlocking {
+        history.items.value = listOf(failed(2, "second", at = 200, peer = "EK2B"), failed(1, "first", at = 100))
+        vm.resendAllFailed()
+        waitUntil { vm.queue.value.size == 2 }
+        assertEquals(listOf("first", "second"), vm.queue.value.map { it.label })
+        assertEquals(setOf(1L, 2L), vm.resent.value)
+
+        vm.resendAllFailed() // nothing new to send
+        assertEquals("No failed messages to send again.", withTimeout(2_000) { vm.messages.first { it.startsWith("No failed") } })
+        assertEquals(2, vm.queue.value.size)
+
+        vm.startListening()
+        waitUntil { client.sent.size == 1 }
+        assertEquals("first", client.sent[0].first.asText())
+        client.events.tryEmit(LinkEvent.Delivered(client.nextSid - 1, by = "EK2B"))
+        waitUntil { client.sent.size == 2 }
+        assertEquals("second", client.sent[1].first.asText())
+        assertEquals("EK2B", client.sent[1].second.station?.destination)
+    }
+
+    @Test
+    fun deleteFailedRemovesOnlyFailedRecords() = runBlocking {
+        val ok = failed(3, "fine", at = 300).copy(status = com.radiome.data.TransferStatus.DELIVERED)
+        history.items.value = listOf(failed(1, "a", at = 100), ok)
+        vm.deleteFailed()
+        waitUntil { history.items.value.size == 1 }
+        assertEquals(3L, history.items.value.single().id)
+    }
+
+    @Test
+    fun scheduledDraftGoesOutWhenDue() = runBlocking {
+        vm.startListening()
+        vm.onToChange("ek2b")
+        vm.onDraftChange("later")
+        vm.scheduleDraft(System.currentTimeMillis() + 300, Repeat.ONCE)
+        assertEquals("", vm.compose.value.draft)
+        assertEquals(1, vm.scheduled.value.size)
+        assertTrue(client.sent.isEmpty())
+        waitUntil { client.sent.size == 1 }
+        assertEquals("later", client.sent.single().first.asText())
+        assertEquals("EK2B", client.sent.single().second.station?.destination)
+        waitUntil { vm.scheduled.value.isEmpty() }
     }
 }

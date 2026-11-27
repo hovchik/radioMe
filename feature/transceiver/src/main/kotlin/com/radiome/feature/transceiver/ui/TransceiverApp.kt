@@ -78,8 +78,10 @@ fun TransceiverApp(
     val queue by viewModel.queue.collectAsStateWithLifecycle()
     val pttDevice by viewModel.pttDevice.collectAsStateWithLifecycle()
     val chatThreads by viewModel.chatThreads.collectAsStateWithLifecycle()
+    val scheduled by viewModel.scheduled.collectAsStateWithLifecycle()
+    val resent by viewModel.resent.collectAsStateWithLifecycle()
     val queueActions = remember(viewModel) {
-        QueueActions(viewModel::onAutoSpeed, viewModel::queueText, viewModel::queueImage, viewModel::removeQueued)
+        QueueActions(viewModel::onAutoSpeed, viewModel::queueText, viewModel::queueImage, viewModel::removeQueued, viewModel::scheduleDraft)
     }
     var tab by rememberSaveable { mutableStateOf(Tab.RADIO) }
     var chatToOpen by remember { mutableStateOf<String?>(null) }
@@ -135,6 +137,9 @@ fun TransceiverApp(
         } else {
             locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
+    }
+    val scheduleLocationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted.values.none { it }) viewModel.notify(tr("Allow location access to send your position."))
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let { viewModel.onImagePicked(it.toString()) }
@@ -209,6 +214,21 @@ fun TransceiverApp(
                 }
             }
         },
+        onResend = viewModel::resend,
+        onResendAllFailed = { viewModel.resendAllFailed() },
+        onDeleteFailed = { viewModel.deleteFailed() },
+        onScheduleText = viewModel::scheduleText,
+        onSchedulePosition = { at, repeat ->
+            // Ask for location now, while the user is here, rather than fail when it is due.
+            val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            viewModel.schedulePosition(at, repeat)
+            if (!fine && !coarse) {
+                scheduleLocationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            }
+        },
+        onCancelScheduled = viewModel::cancelScheduled,
+        onSendScheduledNow = viewModel::sendScheduledNow,
     )
 
     val pickImage = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
@@ -311,7 +331,15 @@ fun TransceiverApp(
                     onClear = { viewModel.clearPositions() },
                     modifier = modifier,
                 )
-                Tab.HISTORY -> HistoryScreen(history, historyActions, modifier)
+                Tab.HISTORY -> HistoryScreen(
+                    items = history,
+                    actions = historyActions,
+                    modifier = modifier,
+                    scheduled = scheduled,
+                    resent = resent,
+                    running = radio.running,
+                    now = now,
+                )
                 Tab.SETTINGS -> SettingsScreen(
                     settings = settings,
                     onChange = viewModel::updateSettings,
