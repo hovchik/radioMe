@@ -44,6 +44,15 @@ import com.radiome.feature.transceiver.HistoryFilter
 import com.radiome.feature.transceiver.link.Repeat
 import com.radiome.feature.transceiver.link.ScheduledMessage
 import androidx.compose.material3.Card
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
+import com.radiome.feature.transceiver.settings.Health
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -132,21 +141,19 @@ fun HistoryScreen(
 
     LazyColumn(
         modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { ScheduledCard(scheduled, running, now, actions, onNew = { newSchedule = true }) }
-        if (items.isEmpty()) {
-            item {
-                Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-                    Text(tr("Nothing sent or received yet."), style = MaterialTheme.typography.bodyLarge)
-                }
-            }
-            return@LazyColumn
-        }
+        item { SummaryCard(counts, failedCount, actions) }
         if (failedCount > 0) {
             item { FailedCard(failedCount, toResend.size, running, actions, onDelete = { confirmDeleteFailed = true }) }
         }
+        item { ScheduledCard(scheduled, running, now, actions, onNew = { newSchedule = true }) }
+        if (items.isEmpty()) {
+            item { EmptyState(Icons.AutoMirrored.Filled.List, tr("Nothing sent or received yet."), tr("Messages, pictures and files you send or receive are kept here.")) }
+            return@LazyColumn
+        }
+        item { SectionTitle(tr("Messages")) }
         item {
             OutlinedTextField(
                 value = query,
@@ -159,69 +166,97 @@ fun HistoryScreen(
                     }
                 },
                 singleLine = true,
+                shape = RoundedCornerShape(28.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
         item {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HistoryFilter.entries.forEach { f ->
-                    FilterChip(
-                        selected = filter == f,
-                        onClick = { filter = f },
-                        label = { Text("${tr(f.label)} (${counts[f] ?: 0})") },
-                    )
+                    CheckChip(filter == f, "${tr(f.label)} (${counts[f] ?: 0})") { filter = f }
                 }
-            }
-        }
-        item {
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = actions.onShareLog) {
-                    Icon(Icons.Filled.Share, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text(tr("Share log"))
-                }
-                OutlinedButton(onClick = actions.onSaveLog) { Text(tr("Save log as file")) }
             }
         }
         if (shown.isEmpty()) {
-            item {
-                Text(
-                    tr("Nothing matches."),
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(vertical = 24.dp),
-                )
-            }
+            item { EmptyState(Icons.Filled.Search, tr("Nothing matches."), tr("Try another word or filter.")) }
         }
         items(shown, key = { it.id }) { HistoryRow(it, actions, resent = it.id in resent, running = running) }
+    }
+}
+
+/** At the top: how much is here, how much failed, and getting the log out. */
+@Composable
+private fun SummaryCard(counts: Map<HistoryFilter, Int>, failed: Int, actions: HistoryActions) {
+    val total = counts[HistoryFilter.ALL] ?: 0
+    StatusHeroCard(
+        health = when {
+            failed > 0 -> Health.ATTENTION
+            total == 0 -> Health.IDLE
+            else -> Health.OK
+        },
+        icon = Icons.AutoMirrored.Filled.List,
+        title = tr("History"),
+        subtitle = when {
+            total == 0 -> tr("Nothing sent or received yet.")
+            failed > 0 -> tr("%d messages not delivered", failed)
+            else -> tr("Everything you sent was delivered or is on its way.")
+        },
+    ) {
+        MetricRow(
+            listOf(
+                tr("Sent") to "${counts[HistoryFilter.SENT] ?: 0}",
+                tr("Received") to "${counts[HistoryFilter.RECEIVED] ?: 0}",
+                tr("Not delivered") to "$failed",
+            ),
+        )
+        if (total > 0) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = actions.onShareLog) {
+                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(tr("Share log"))
+                }
+                OutlinedButton(onClick = actions.onSaveLog) {
+                    Icon(RadioIcons.file, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(tr("Save log as file"))
+                }
+            }
+        }
     }
 }
 
 /** Messages that were not delivered: send them all again, or clear them out. */
 @Composable
 private fun FailedCard(failed: Int, toResend: Int, running: Boolean, actions: HistoryActions, onDelete: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                tr("%d messages not delivered", failed),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            Text(
-                when {
-                    toResend == 0 -> tr("All of them were sent again already.")
-                    running -> tr("Resend puts them in the queue, so they go out one after another.")
-                    else -> tr("Resend queues them until the radio is on.")
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Warning, contentDescription = null)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(tr("%d messages not delivered", failed), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        when {
+                            toResend == 0 -> tr("All of them were sent again already.")
+                            running -> tr("Resend puts them in the queue, so they go out one after another.")
+                            else -> tr("Resend queues them until the radio is on.")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = actions.onResendAllFailed, enabled = toResend > 0) {
-                    Icon(Icons.Filled.Refresh, contentDescription = null)
+                    Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(tr("Resend failed now (%d)", toResend))
                 }
-                OutlinedButton(onClick = onDelete) { Text(tr("Delete failed")) }
+                OutlinedButton(onClick = onDelete) {
+                    Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(tr("Delete failed"))
+                }
             }
         }
     }
@@ -230,46 +265,46 @@ private fun FailedCard(failed: Int, toResend: Int, running: Boolean, actions: Hi
 /** Messages waiting for their time, with a way to make a new one. */
 @Composable
 private fun ScheduledCard(scheduled: List<ScheduledMessage>, running: Boolean, now: Long, actions: HistoryActions, onNew: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (scheduled.isEmpty()) tr("Scheduled") else tr("Scheduled (%d)", scheduled.size),
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    Text(
-                        if (scheduled.isEmpty()) tr("Send a message or your position at a set time.")
-                        else if (running) tr("They go out by themselves at their time.")
-                        else tr("The radio is off: due messages go out when you turn it on."),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                FilledTonalButton(onClick = onNew) {
-                    Icon(Icons.Filled.Add, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text(tr("Schedule"))
-                }
+    SettingsCard(
+        icon = RadioIcons.schedule,
+        title = if (scheduled.isEmpty()) tr("Scheduled") else tr("Scheduled (%d)", scheduled.size),
+        summary = if (scheduled.isEmpty()) tr("Send a message or your position at a set time.")
+        else if (running) tr("They go out by themselves at their time.")
+        else tr("The radio is off: due messages go out when you turn it on."),
+        status = {
+            FilledTonalButton(onClick = onNew, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(tr("Schedule"))
             }
-            scheduled.forEach { m ->
-                HorizontalDivider()
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (m.isPosition) Icons.Filled.LocationOn else Icons.Filled.DateRange,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+        },
+    ) {
+        scheduled.forEachIndexed { i, m ->
+            if (i > 0) RowDivider()
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (m.isPosition) Icons.Filled.LocationOn else RadioIcons.schedule,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(History.scheduledTitle(m), style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+                    val time = remember(m.dueAt) { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(m.dueAt)) }
+                    val repeat = if (m.repeat == Repeat.ONCE) "" else " · ${History.repeatLabel(m.repeat)}"
+                    Text(
+                        "$time · ${History.dueIn(m.dueAt, now)}$repeat",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(History.scheduledTitle(m), style = MaterialTheme.typography.bodyMedium, maxLines = 2)
-                        val time = remember(m.dueAt) { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(m.dueAt)) }
-                        val repeat = if (m.repeat == Repeat.ONCE) "" else " · ${History.repeatLabel(m.repeat)}"
-                        Text("$time · ${History.dueIn(m.dueAt, now)}$repeat", style = MaterialTheme.typography.bodySmall)
-                    }
-                    TextButton(onClick = { actions.onSendScheduledNow(m.id) }) { Text(tr("Send now")) }
-                    IconButton(onClick = { actions.onCancelScheduled(m.id) }) {
-                        Icon(Icons.Filled.Close, contentDescription = tr("Cancel scheduled message"))
-                    }
+                }
+                TextButton(onClick = { actions.onSendScheduledNow(m.id) }) { Text(tr("Send now")) }
+                IconButton(onClick = { actions.onCancelScheduled(m.id) }) {
+                    Icon(Icons.Filled.Close, contentDescription = tr("Cancel scheduled message"))
                 }
             }
         }
@@ -280,81 +315,101 @@ private fun ScheduledCard(scheduled: List<ScheduledMessage>, running: Boolean, n
 private fun HistoryRow(r: TransferRecord, actions: HistoryActions, resent: Boolean, running: Boolean) {
     val clipboard = LocalClipboardManager.current
     val time = remember(r.updatedAt) { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(r.updatedAt)) }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    var details by rememberSaveable(r.id) { mutableStateOf(false) }
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val dir = if (r.direction == Direction.OUTGOING) tr("Sent") else tr("Received")
+                IconBadge(contentIcon(r.contentType))
+                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
+                    val dir = if (r.direction == Direction.OUTGOING) tr("Sent") else tr("Received")
                     val who = when (r.direction) {
                         Direction.INCOMING -> r.peer?.let { tr(" from %s", it) } ?: ""
                         Direction.OUTGOING -> r.peer?.let { tr(" to %s", it) } ?: ""
                     }
+                    Text("$dir$who", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val lock = if (r.encrypted) tr(" · encrypted") else ""
-                    Text("$dir$who · ${statusLabel(r.status)}$lock", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "$time · %04X".format(r.sessionId) + (r.profile?.let { " · ${it.lowercase()}" } ?: ""),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    Text("$time$lock", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                StatusPill(statusLabel(r.status), statusHealth(r.status))
                 IconButton(onClick = { actions.onDelete(r.id) }) { Icon(Icons.Filled.Delete, contentDescription = tr("Delete")) }
             }
-            when {
-                r.contentType == ContentType.TEXT && r.text != null -> Text(r.text!!, style = MaterialTheme.typography.bodyLarge)
-                r.contentType?.isImage == true && r.payload != null ->
-                    PayloadImage(displayImageBytes(r.contentType, r.payload!!), "Image ${r.name}", Modifier.fillMaxWidth().heightIn(max = 240.dp))
-                r.contentType == ContentType.BINARY && r.payload != null ->
-                    Text(tr("File %s · %s", r.name.ifBlank { tr("without name") }, Presenters.formatBytes(r.payload!!.size)), style = MaterialTheme.typography.bodyLarge)
-                r.contentType == ContentType.VOICE && r.payload != null -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { actions.onPlayVoice(r) }) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text(tr("Play"))
+            Column(Modifier.padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                when {
+                    r.contentType == ContentType.TEXT && r.text != null -> Text(r.text!!, style = MaterialTheme.typography.bodyLarge)
+                    r.contentType?.isImage == true && r.payload != null ->
+                        PayloadImage(displayImageBytes(r.contentType, r.payload!!), "Image ${r.name}", Modifier.fillMaxWidth().heightIn(max = 240.dp))
+                    r.contentType == ContentType.BINARY && r.payload != null ->
+                        AttachmentTile(RadioIcons.file, r.name.ifBlank { tr("without name") }, Presenters.formatBytes(r.payload!!.size)) {}
+                    r.contentType == ContentType.VOICE && r.payload != null -> {
+                        val secs = (VoiceNote.decode(r.payload!!)?.durationMs() ?: 0L).plus(500) / 1000
+                        AttachmentTile(RadioIcons.mic, tr("Voice note"), "$secs s") {
+                            IconButton(onClick = { actions.onPlayVoice(r) }) { Icon(Icons.Filled.PlayArrow, contentDescription = tr("Play")) }
+                        }
                     }
-                    Spacer(Modifier.width(12.dp))
-                    val secs = (VoiceNote.decode(r.payload!!)?.durationMs() ?: 0L).plus(500) / 1000
-                    Text(tr("Voice note %d s", secs), style = MaterialTheme.typography.bodyLarge)
+                    r.payload != null -> Text("${r.payload!!.size} bytes ${r.name}")
+                    else -> Unit
                 }
-                r.payload != null -> Text("${r.payload!!.size} bytes ${r.name}")
-                else -> Unit
+                if (r.direction == Direction.OUTGOING) Receipt(r)
+                if (details) {
+                    val chunks = if (r.totalChunks > 0) {
+                        "${r.receivedChunks.takeIf { r.direction == Direction.INCOMING } ?: r.totalChunks}/${r.totalChunks} chunks · " +
+                            "FEC fixed ${r.fecCorrectedBytes} B · loss %.1f%% · repairs ${r.repairRounds}".format(r.lossPercent)
+                    } else {
+                        null
+                    }
+                    Text(
+                        listOfNotNull(
+                            "%04X".format(r.sessionId) + (r.profile?.let { " · ${it.lowercase()}" } ?: ""),
+                            chunks,
+                        ).joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             val savable = r.payload != null && (r.contentType?.isImage == true || r.contentType == ContentType.BINARY)
-            if (savable) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (r.contentType?.isImage == true) {
-                        OutlinedButton(onClick = { actions.onSaveToGallery(r) }) { Text(tr("Save to gallery")) }
-                    }
-                    OutlinedButton(onClick = { actions.onSave(r) }) { Text(tr("Save as file")) }
-                }
-            }
-            if (r.direction == Direction.OUTGOING) Receipt(r)
             val canResend = History.canResend(r)
             val copyable = r.contentType == ContentType.TEXT && r.text != null
-            if (canResend || copyable) {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (canResend) {
-                        if (resent) {
-                            Text(tr("Sent again"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                        }
-                        FilledTonalButton(onClick = { actions.onResend(r) }, enabled = running) {
-                            Icon(Icons.Filled.Refresh, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (resent) tr("Resend again") else tr("Resend now"))
-                        }
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (canResend) {
+                    FilledTonalButton(onClick = { actions.onResend(r) }, enabled = running) {
+                        Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (resent) tr("Resend again") else tr("Resend now"))
                     }
-                    if (copyable) {
-                        TextButton(onClick = { clipboard.setText(AnnotatedString(r.text!!)) }) { Text(tr("Copy text")) }
-                    }
+                    if (resent) Text(tr("Sent again"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                 }
-            }
-            if (r.totalChunks > 0) {
-                Text(
-                    "${r.receivedChunks.takeIf { r.direction == Direction.INCOMING } ?: r.totalChunks}/${r.totalChunks} chunks · " +
-                        "FEC fixed ${r.fecCorrectedBytes} B · loss %.1f%% · repairs ${r.repairRounds}".format(r.lossPercent),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                if (savable && r.contentType?.isImage == true) {
+                    TextButton(onClick = { actions.onSaveToGallery(r) }) { Text(tr("Save to gallery")) }
+                }
+                if (savable) TextButton(onClick = { actions.onSave(r) }) { Text(tr("Save as file")) }
+                if (copyable) TextButton(onClick = { clipboard.setText(AnnotatedString(r.text!!)) }) { Text(tr("Copy text")) }
+                TextButton(onClick = { details = !details }) { Text(if (details) tr("Hide details") else tr("Details")) }
             }
         }
     }
+}
+
+/** The round icon for a record: text, picture, file, voice or position. */
+private fun contentIcon(type: ContentType?): ImageVector = when {
+    type == ContentType.TEXT -> Icons.Filled.Email
+    type?.isImage == true -> RadioIcons.image
+    type == ContentType.VOICE -> RadioIcons.mic
+    type == ContentType.POSITION -> Icons.Filled.LocationOn
+    else -> RadioIcons.file
+}
+
+private fun statusHealth(s: TransferStatus): Health = when (s) {
+    TransferStatus.DELIVERED, TransferStatus.COMPLETE -> Health.OK
+    TransferStatus.SENDING, TransferStatus.RECEIVING -> Health.ATTENTION
+    TransferStatus.INCOMPLETE -> Health.ATTENTION
+    TransferStatus.FAILED -> Health.PROBLEM
+    TransferStatus.CANCELLED -> Health.IDLE
 }
 
 /** Delivery receipt for a sent message: who confirmed it, or where it stands. */

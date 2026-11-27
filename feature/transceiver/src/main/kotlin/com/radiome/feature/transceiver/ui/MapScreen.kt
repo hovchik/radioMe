@@ -39,6 +39,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import com.radiome.feature.transceiver.settings.Health
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -478,8 +482,13 @@ private fun MapInfoPanel(
     ) {
         Column(Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
+                IconBadge(
+                    Icons.Filled.Lock,
+                    container = healthColor(if (hasKey) Health.OK else Health.PROBLEM).copy(alpha = 0.18f),
+                    content = healthColor(if (hasKey) Health.OK else Health.PROBLEM),
+                    size = 28.dp,
+                )
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (hasKey) tr("Encrypted · key %s", fingerprint) else tr("No group key: positions can't be sent or read"),
@@ -505,6 +514,8 @@ private fun MapInfoPanel(
             }
             locationProblem?.let { (text, button, action) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Warning, contentDescription = null, tint = RadioColors.repaired, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                     TextButton(onClick = action) { Text(button) }
                 }
@@ -636,13 +647,14 @@ private fun StationList(
                 )
             }
         }
-        items(positions, key = { MapGeo.key(it) }) { p ->
+        itemsIndexed(positions, key = { _, it -> MapGeo.key(it) }) { i, p ->
+            if (i > 0) RowDivider()
             Row(
-                Modifier.fillMaxWidth().clickable { onPick(p) }.padding(horizontal = 12.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onPick(p) }.padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 FreshnessDot(p, now)
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(label(p), style = MaterialTheme.typography.titleSmall)
                     Text(
@@ -652,8 +664,10 @@ private fun StationList(
                             p.position.speedMps?.takeIf { it >= 0.5 }?.let { MapGeo.formatSpeed(it) },
                         ).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         if (positions.isNotEmpty()) {
