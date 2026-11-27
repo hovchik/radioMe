@@ -83,15 +83,18 @@ object RoutePicker {
     private fun cablePair(inputs: List<DeviceDesc>, outputs: List<DeviceDesc>): Pair<DeviceDesc?, DeviceDesc?> {
         val ins = inputs.filter { isCable(it.type) }.sortedBy(::rank)
         val outs = outputs.filter { isCable(it.type) }.sortedBy(::rank)
-        // Same physical device in both directions: same address (USB card), else same family and name.
+        // Same physical device in both directions: same address (USB card); only when either address is unknown,
+        // same family and name. Two different non-empty addresses are never the same device.
+        fun addressesDiffer(i: DeviceDesc, o: DeviceDesc) = i.address.isNotEmpty() && o.address.isNotEmpty() && i.address != o.address
         for (i in ins) {
             val o = outs.firstOrNull { o ->
-                (i.address.isNotEmpty() && i.address == o.address) || (rank(i) == rank(o) && i.name == o.name)
+                (i.address.isNotEmpty() && i.address == o.address) ||
+                    (!addressesDiffer(i, o) && rank(i) == rank(o) && i.name == o.name)
             }
             if (o != null) return i to o
         }
         for (i in ins) {
-            val o = outs.firstOrNull { rank(it) == rank(i) }
+            val o = outs.firstOrNull { rank(it) == rank(i) && !addressesDiffer(i, it) }
             if (o != null) return i to o
         }
         return ins.firstOrNull() to outs.firstOrNull()

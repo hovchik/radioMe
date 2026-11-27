@@ -83,6 +83,19 @@ class RoutePickerTest {
     }
 
     @Test
+    fun sameNamedUsbCardsAreNotCrossPaired() {
+        val jackIn = DeviceDesc(3, WIRED_HEADSET, "Headset")
+        val jackOut = DeviceDesc(4, WIRED_HEADSET, "Headset")
+        val aIn = DeviceDesc(5, USB_DEVICE, "USB Audio Device", "card=1;device=0")
+        val bIn = DeviceDesc(6, USB_DEVICE, "USB Audio Device", "card=2;device=0")
+        val bOut = DeviceDesc(7, USB_DEVICE, "USB Audio Device", "card=2;device=0")
+        val aOut = DeviceDesc(8, USB_DEVICE, "USB Audio Device", "card=1;device=0")
+        val c = RoutePicker.pick(RoutePreference.AUTO, listOf(jackIn, aIn, bIn), listOf(jackOut, bOut, aOut))
+        assertEquals(aIn, c.input)
+        assertEquals(aOut, c.output)
+    }
+
+    @Test
     fun forcedCableWithNothingPluggedInIsFlagged() {
         val c = RoutePicker.pick(RoutePreference.CABLE, phoneOnlyIn, phoneOnlyOut)
         assertEquals(RouteMode.CABLE, c.mode)
