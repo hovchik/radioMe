@@ -121,6 +121,8 @@ class ScheduledSenderTest {
     fun messageScheduledEncryptedStaysEncryptedWhenEncryptionIsTurnedOff() = runBlocking {
         keys.setPassphrase("correct horse battery")
         settings.update { it.copy(encryptMessages = true) }
+        // The settings flow catches up with DataStore a moment later; add() reads it.
+        waitUntil { settings.settings.value.encryptMessages }
         sender.start()
         sender.add("secret", Payload.text("secret"), "", null, System.currentTimeMillis() + 100)
         settings.update { it.copy(encryptMessages = false) }
