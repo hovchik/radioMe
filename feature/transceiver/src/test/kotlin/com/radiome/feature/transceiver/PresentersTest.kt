@@ -115,6 +115,25 @@ class PresentersTest {
     }
 
     @Test
+    fun cableHints() {
+        val cable = com.radiome.feature.transceiver.link.RouteInfo(com.radiome.core.audio.RouteMode.CABLE, "USB Audio", "USB Audio")
+        val base = RadioUi(running = true, inputLevel = InputLevel.GOOD, route = cable)
+        assertNull(base.hint)
+        // No USB PTT adapter: the radio would never key, so this beats the level hints.
+        val noPtt = base.copy(route = cable.copy(pttMissing = true), inputLevel = InputLevel.HOT)
+        assertTrue(noPtt.hint!!.contains("PTT"))
+        assertTrue(base.copy(route = cable.copy(cableMissing = true)).hint!!.contains("none is plugged in"))
+        // Over a cable a low media volume is normal (radio mic inputs are sensitive); a hot one overdrives the radio.
+        assertNull(base.copy(volumeAdvice = com.radiome.core.audio.VolumeAdvice.TOO_LOW).hint)
+        assertTrue(base.copy(volumeAdvice = com.radiome.core.audio.VolumeAdvice.CLIPPING_RISK).hint!!.contains("overdrive"))
+        // Clipping input: there is no phone to move away.
+        assertFalse(base.copy(inputLevel = InputLevel.HOT).hint!!.contains("phone"))
+        // Acoustic keeps the VOX advice.
+        val acoustic = base.copy(route = cable.copy(mode = com.radiome.core.audio.RouteMode.ACOUSTIC))
+        assertTrue(acoustic.copy(volumeAdvice = com.radiome.core.audio.VolumeAdvice.TOO_LOW).hint!!.contains("VOX"))
+    }
+
+    @Test
     fun audioFailureMessages() {
         val tone = Presenters.eventMessage(LinkEvent.AudioOutputFailed(com.radiome.core.protocol.link.LinkController.TEST_TONE_SESSION, "boom"), true)
         assertTrue(tone!!.startsWith("Test tone failed"))

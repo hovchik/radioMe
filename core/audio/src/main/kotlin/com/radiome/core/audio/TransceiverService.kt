@@ -12,10 +12,13 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import com.radiome.core.dsp.modem.MfskModemEngine
 import com.radiome.core.dsp.modem.ModemConfig
@@ -139,17 +142,31 @@ class TransceiverService : Service() {
     /** USB serial adapter keying PTT, or null (none needed, none found, or access not granted yet). */
     val pttDevice: StateFlow<String?> = _pttDevice.asStateFlow()
 
+    private val _pttMissing = MutableStateFlow(false)
+    /**
+     * The running link keys PTT over USB serial but no adapter is open: bursts still play, yet the radio is not
+     * keyed, so nothing goes on the air unless its VOX happens to be on.
+     */
+    val pttMissing: StateFlow<Boolean> = _pttMissing.asStateFlow()
+
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    serialPtt?.close()
-                    _pttDevice.value = null
+                    // Only our adapter going away closes the keyer; another USB device (the audio side of a cable,
+                    // a hub port) leaves it alone. Either way look again, in case a second adapter is attached.
+                    val gone = usbDevice(intent)
+                    val keyer = serialPtt ?: return
+                    if (gone == null || keyer.isUsing(gone)) keyer.close()
+                    refreshPtt(askPermission = false)
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                    // A newly plugged adapter: ask again even if access to an earlier one was refused.
+                    // A newly plugged adapter: ask again even if access to an earlier one was refused. Wait a moment
+                    // first: when the user ticked "always open RadioMe", Android grants access just after this
+                    // broadcast, and asking before that would pop a needless dialog.
                     usbAccessDenied = false
-                    refreshPtt()
+                    mainHandler.removeCallbacks(attachRefresh)
+                    mainHandler.postDelayed(attachRefresh, ATTACH_SETTLE_MS)
                 }
                 UsbSerialPtt.ACTION_PERMISSION -> {
                     if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
@@ -162,14 +179,24 @@ class TransceiverService : Service() {
             }
         }
     }
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val attachRefresh = Runnable { refreshPtt() }
     private var usbReceiverRegistered = false
     private var usbAccessDenied = false
 
     /** Look for the PTT adapter again (after plugging it in, or once access was granted). */
-    fun refreshPtt() {
+    fun refreshPtt(askPermission: Boolean = true) {
         val keyer = serialPtt ?: return
-        keyer.refresh(askPermission = !usbAccessDenied)
+        keyer.refresh(askPermission = askPermission && !usbAccessDenied)
         _pttDevice.value = keyer.deviceName
+        _pttMissing.value = !keyer.ready
+    }
+
+    private fun usbDevice(intent: Intent): UsbDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+    } else {
+        @Suppress("DEPRECATION")
+        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
     }
 
     private fun registerUsbReceiver() {
@@ -189,6 +216,7 @@ class TransceiverService : Service() {
     }
 
     private fun unregisterUsbReceiver() {
+        mainHandler.removeCallbacks(attachRefresh)
         if (!usbReceiverRegistered) return
         runCatching { unregisterReceiver(usbReceiver) }
         usbReceiverRegistered = false
@@ -304,6 +332,7 @@ class TransceiverService : Service() {
         engine = null
         serialPtt = null
         _pttDevice.value = null
+        _pttMissing.value = false
         unregisterUsbReceiver()
         if (controller != null) dependencies?.onLinkStopped(controller)
         dependencies = null
@@ -371,6 +400,7 @@ class TransceiverService : Service() {
 
     companion object {
         private const val TAG = "TransceiverService"
+        private const val ATTACH_SETTLE_MS = 600L
         const val CHANNEL_ID = "radiome.transceiver"
         const val NOTIFICATION_ID = 0x5A
         const val ACTION_START = "com.radiome.core.audio.START"

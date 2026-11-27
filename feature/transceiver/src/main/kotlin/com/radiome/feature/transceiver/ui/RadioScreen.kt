@@ -197,7 +197,11 @@ private fun StatusCard(
                     }
                     Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1)
                     val routeText = radio.route?.let {
-                        val mode = if (it.mode == RouteMode.CABLE) tr("Cable") else tr("Acoustic")
+                        val mode = when {
+                            it.cableMissing -> tr("Cable not found")
+                            it.mode == RouteMode.CABLE -> tr("Cable")
+                            else -> tr("Acoustic")
+                        }
                         val out = radio.outputDevice ?: it.output
                         "$mode · in: ${it.input} · out: $out"
                     } ?: if (radio.running) tr("Audio route: starting") else tr("Start listening to receive. Sending also needs the radio on.")

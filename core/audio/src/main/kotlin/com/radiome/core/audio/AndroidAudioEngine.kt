@@ -39,8 +39,11 @@ data class AudioEngineConfig(
     val pttMode: PttMode = PttMode.VOX,
     /** With a keyed PTT: time between keying and the first sample, for the radio to switch to transmit. */
     val pttLeadMs: Int = 150,
-    /** With a keyed PTT: hold after the last sample, so the end of the burst is not cut. */
-    val pttTailMs: Int = 60,
+    /**
+     * With a keyed PTT: hold after the last sample has left AudioTrack, so the end of the burst is not cut. USB audio
+     * interfaces buffer 50-100 ms more after that point, so this has to cover their output latency too.
+     */
+    val pttTailMs: Int = 150,
 )
 
 /**
@@ -72,14 +75,18 @@ class AndroidAudioEngine(
     @Volatile var preferredInput: AudioDeviceInfo? = null
         set(value) {
             field = value
-            record?.preferredDevice = value
+            runCatching { record?.preferredDevice = value }
         }
 
     @Volatile var preferredOutput: AudioDeviceInfo? = null
         set(value) {
             field = value
-            track?.preferredDevice = value
+            runCatching { track?.preferredDevice = value }
         }
+
+    /** Times capture was reopened after the input device went away (cable unplugged), for diagnostics. */
+    @Volatile var captureRestarts: Int = 0
+        private set
 
     /** Audio source actually in use, for diagnostics. */
     val usesUnprocessedSource: Boolean =
@@ -88,8 +95,8 @@ class AndroidAudioEngine(
     @Volatile var droppedBlocks: Long = 0
         private set
 
-    private var record: AudioRecord? = null
-    private var track: AudioTrack? = null
+    @Volatile private var record: AudioRecord? = null
+    @Volatile private var track: AudioTrack? = null
     @Volatile private var capturing = false
     private var captureThread: Thread? = null
 
@@ -119,10 +126,17 @@ class AndroidAudioEngine(
     }
 
     /** Starts capture. The caller must hold RECORD_AUDIO. */
-    @SuppressLint("MissingPermission")
     @Synchronized
     fun startCapture() {
         if (capturing) return
+        val rec = openRecord() // throws here, on the caller's thread, if the microphone can't be opened at all
+        record = rec
+        capturing = true
+        captureThread = Thread({ captureLoop(rec) }, "radiome-rx").apply { start() }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun openRecord(): AudioRecord {
         val source = if (usesUnprocessedSource) MediaRecorder.AudioSource.UNPROCESSED else MediaRecorder.AudioSource.VOICE_RECOGNITION
         val minBuf = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val rec = AudioRecord.Builder()
@@ -136,51 +150,84 @@ class AndroidAudioEngine(
             )
             .setBufferSizeInBytes(maxOf(minBuf * 4, sampleRate * 2 / 2)) // at least 500 ms
             .build()
-        check(rec.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord failed to initialise" }
+        if (rec.state != AudioRecord.STATE_INITIALIZED) {
+            rec.release()
+            error("AudioRecord failed to initialise")
+        }
         disableEffects(rec.audioSessionId)
         preferredInput?.let { rec.preferredDevice = it }
-        record = rec
-        capturing = true
         rec.startRecording()
-        captureThread = Thread({ captureLoop(rec) }, "radiome-rx").apply { start() }
+        return rec
     }
 
     @Synchronized
     fun stopCapture() {
         capturing = false
-        captureThread?.join(500)
+        // Unblocks a pending read; the capture thread releases the record on its way out.
+        runCatching { record?.stop() }
+        captureThread?.join(1_000)
         captureThread = null
-        record?.run {
-            runCatching { stop() }
-            release()
-        }
         record = null
     }
 
-    private fun captureLoop(rec: AudioRecord) {
+    private fun captureLoop(first: AudioRecord) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+        var rec: AudioRecord? = first
         val n = config.blockSamples
         val pcm = ShortArray(n)
-        while (capturing) {
-            var read = 0
-            while (read < n && capturing) {
-                val r = rec.read(pcm, read, n - read, AudioRecord.READ_BLOCKING)
-                if (r < 0) break
-                read += r
+        try {
+            while (capturing) {
+                val r0 = rec ?: reopenRecord() ?: continue
+                rec = r0
+                var read = 0
+                var failed = false
+                while (read < n && capturing) {
+                    val r = r0.read(pcm, read, n - read, AudioRecord.READ_BLOCKING)
+                    if (r < 0) {
+                        failed = true
+                        break
+                    }
+                    read += r
+                }
+                if (failed) {
+                    // The input device went away (USB cable unplugged, ERROR_DEAD_OBJECT): reading again would fail
+                    // at once and spin. Drop this AudioRecord and open a new one on the current route.
+                    releaseQuietly(r0)
+                    rec = null
+                    continue
+                }
+                if (read < n) continue
+                if (guard.shouldDrop(n)) continue
+                val block = pool.poll()
+                if (block == null) {
+                    droppedBlocks++
+                    continue
+                }
+                Pcm.pcm16ToFloat(pcm, n, block)
+                if (!filled.trySend(block).isSuccess) {
+                    pool.offer(block)
+                    droppedBlocks++
+                }
             }
-            if (read < n) continue
-            if (guard.shouldDrop(n)) continue
-            val block = pool.poll()
-            if (block == null) {
-                droppedBlocks++
-                continue
-            }
-            Pcm.pcm16ToFloat(pcm, n, block)
-            if (!filled.trySend(block).isSuccess) {
-                pool.offer(block)
-                droppedBlocks++
-            }
+        } finally {
+            rec?.let(::releaseQuietly)
         }
+    }
+
+    /** Opens a fresh AudioRecord after a failure, waiting a little first; null (and try again) while that fails. */
+    private fun reopenRecord(): AudioRecord? {
+        runCatching { Thread.sleep(REOPEN_DELAY_MS) }
+        if (!capturing) return null
+        return runCatching { openRecord() }.getOrNull()?.also {
+            captureRestarts++
+            record = it
+            if (!capturing) runCatching { it.stop() }
+        }
+    }
+
+    private fun releaseQuietly(r: AudioRecord) {
+        runCatching { r.stop() }
+        runCatching { r.release() }
     }
 
     /** Device the last transmission actually played through ("Speaker", "USB audio"...), for the status line. */
@@ -245,6 +292,12 @@ class AndroidAudioEngine(
                 ensureActive()
                 Thread.sleep(5)
             }
+        } catch (e: IllegalStateException) {
+            // The output device went away mid-burst (cable unplugged, ERROR_DEAD_OBJECT). Drop the track so the next
+            // burst opens a new one on the current route instead of failing the same way forever.
+            if (track === t) track = null
+            runCatching { t.release() }
+            throw e
         } finally {
             runCatching {
                 t.pause()
@@ -318,6 +371,7 @@ class AndroidAudioEngine(
         /** Right-channel keying tone for VOX-tone PTT: well inside any audio interface's passband. */
         const val VOX_TONE_HZ = 1_000.0
         const val VOX_TONE_LEVEL = 0.7f
+        const val REOPEN_DELAY_MS = 200L
     }
 }
 
